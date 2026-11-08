@@ -2,7 +2,7 @@
 
 Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
 
-Version 1.5.0 · iDrive 8 only · package `iteriodev_overlays` · [all apps and how to install](../../README.md)
+Version 1.6.0 · iDrive 8 only · package `iteriodev_overlays` · [all apps and how to install](../../README.md)
 
 > [!NOTE]
 > The strip in the climate bar is car-tested (G82); the app's pages are not yet. Needs the Overlays tool (the Store installs it with the app).
@@ -39,7 +39,7 @@ Tap order, the ambient light flash and its colours, the steering wheel's side (*
 
 ![Align](screenshots/align.png)
 
-When a seat or steering wheel icon in the bar is not quite over the car's own spot: pick the button (or *All*), then tap *Left* / *Right* / *Up* / *Down* while you watch the climate bar, 1 or 5 px at a time. Left / right moves the whole button (icon, coloured line and touch area), up / down moves its icon. Kept over updates. Needs the Overlays tool 0.5.0.
+When a seat or steering wheel icon in the bar is not quite over the car's own spot: an arrow pad each for the heated seat (driver or passenger), the steering wheel heating, and the other buttons (all of them at once, or a seat's ventilation). Tap the arrows while you watch the climate bar, 1 or 5 px at a time; the middle button resets that one. Left / right moves the whole button (icon, coloured line and touch area), up / down moves its icon. Kept over updates. Needs the Overlays tool 0.5.0 or newer.
 
 ### Shift lights
 
