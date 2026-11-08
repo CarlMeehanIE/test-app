@@ -64,5 +64,76 @@ function test() {
     setTimeout(() => { assert(done, 'scan answered'); console.log('finder self-check ok'); }, 1500);
 }
 
-module.exports = { scan, lines, WORDS, test };
-if (require.main === module) test();
+/* ---- record: which files change while the user flips the menu item (read-only: find -newer, a marker file of ours) ----
+ * start(): a marker now; QUIET_MS later a second one, and the files changed in between (what the unit writes by itself:
+ * logs, counters) are kept as noise. stop(): the files changed since the second marker, less the noise, the most
+ * telling first (privacy / location words, then settings-like places). */
+const QUIET_MS = 10000;
+const PRUNE = ['/proc', '/sys', '/dev'];
+const changedSince = (mark, cb, root) => {
+    const args = [root || '/', '('].concat(...PRUNE.map((d, i) => (i ? ['-o', '-path', d] : ['-path', d])), [')', '-prune', '-o', '-type', 'f', '-newer', mark, '-print']);
+    execFile('find', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
+        if (e && (e.code === 'ENOENT' || e.killed)) return cb(new Error(e.code === 'ENOENT' ? 'no find on this unit' : 'listing took too long'));
+        cb(null, String(out || '').split('\n').filter(Boolean).filter((f) => !/\/carlm-overlays\//.test(f) && f !== mark));
+    });
+};
+function rankFiles(files) {
+    const sc = (f) => (new RegExp(WORDS, 'i').test(f) ? 4 : 0) + (/persist|setting|config|pers|user|profile|\.db|\.json|\.xml|\.dat/i.test(f) ? 2 : 0) -
+        (/log|journal|dlt|trace|\.tmp|cache/i.test(f) ? 3 : 0);
+    return files.map((f, i) => ({ f, s: sc(f), i })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.f);
+}
+function recorder(o) {
+    const dir = (o && o.dir) || '/run/carlm-overlays', root = o && o.root, quiet = (o && o.quietMs) || QUIET_MS;
+    const markA = path.join(dir, 'finder-mark-a'), markB = path.join(dir, 'finder-mark-b');
+    let noise = null, ready = false;
+    const touch = (f) => { fs.writeFileSync(f, `${Date.now()}\n`); };
+    return {
+        start(onReady) {                       // onReady(err): the quiet window is over, the user may flip the item
+            noise = null; ready = false;
+            try { touch(markA); } catch (e) { return onReady(e); }
+            setTimeout(() => changedSince(markA, (e, files) => {
+                if (e) return onReady(e);
+                noise = new Set(files);
+                try { touch(markB); } catch (we) { return onReady(we); }
+                ready = true;
+                onReady(null, noise.size);
+            }, root), quiet);
+        },
+        stop(cb, file) {                        // cb(err, { at, total, lines, noise, file })
+            if (!ready) return cb(new Error('not recording yet'));
+            changedSince(markB, (e, files) => {
+                if (e) return cb(e);
+                const hit = rankFiles(files.filter((f) => !noise.has(f)));
+                const res = { at: new Date().toISOString(), total: hit.length, lines: hit.slice(0, MAX_LINES), noise: noise.size, file: file || null, kind: 'record' };
+                if (file) { try { fs.writeFileSync(file, `${res.at} (changed while recording, ${res.noise} noisy files left out)\n${hit.join('\n')}\n`); } catch (we) { res.file = null; } }
+                ready = false;
+                cb(null, res);
+            }, root);
+        },
+    };
+}
+
+function testRecord(done) {
+    const assert = require('assert'), os = require('os');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'finder-')), d = path.join(tmp, 'car'), run = path.join(tmp, 'run');
+    fs.mkdirSync(d); fs.mkdirSync(run); fs.mkdirSync(path.join(d, 'var'));
+    fs.writeFileSync(path.join(d, 'var', 'noisy.log'), '1'); fs.writeFileSync(path.join(d, 'var', 'privacy_settings.json'), '{"loc":1}');
+    const r = recorder({ dir: run, root: d, quietMs: 2200 });
+    setTimeout(() => fs.writeFileSync(path.join(d, 'var', 'noisy.log'), '2'), 1100);      // the unit writing by itself
+    r.start((e) => {
+        assert.ifError(e);
+        setTimeout(() => {
+            fs.writeFileSync(path.join(d, 'var', 'noisy.log'), '3');                         // again, while recording
+            fs.writeFileSync(path.join(d, 'var', 'privacy_settings.json'), '{"loc":0}');     // the user's flip
+            r.stop((e2, res) => {
+                assert.ifError(e2);
+                assert.deepStrictEqual(res.lines, [path.join(d, 'var', 'privacy_settings.json')], 'only what the flip changed');
+                done();
+            });
+        }, 1100);
+    });
+    // the markers are set 1 s apart at least: find -newer compares whole seconds on some filesystems
+}
+
+module.exports = { scan, lines, WORDS, recorder, rankFiles, test, testRecord };
+if (require.main === module) { test(); testRecord(() => console.log('finder record self-check ok')); }

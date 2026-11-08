@@ -2,7 +2,7 @@
 
 Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
 
-Version 1.12.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
+Version 1.13.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
 
 > [!NOTE]
 > The strip in the climate bar is car-tested (G82); the app's pages are not yet. Needs the Overlays tool (the Store installs it with the app).
@@ -43,7 +43,7 @@ Hidden until you tap *Developed by IterioDev and RobertNisipeanu* (top right of 
 
 ### Finder (hidden)
 
-Shown with Align (the 5 taps). Step 1 of finding the car's "track my car" setting: *Scan* searches the head unit's own configuration files, read-only, for privacy, location and tracking services; the most telling lines first, 16 a page, the full list saved on the unit (`/var/opt/carlm-overlays/finder.txt`). Needs the eOverlays tool 0.11.0.
+Shown with Align (the 5 taps). Finding the car's "track my car" setting. *Record*: 10 s of quiet (the files the unit writes by itself, left out), then switch Track my BMW off and on and tap *Stop*: the files that changed meanwhile (`finder-record.txt`). *Scan* searches the head unit's own configuration files, read-only, for privacy, location and tracking services; the most telling lines first, 16 a page, the full list saved on the unit (`/var/opt/carlm-overlays/finder.txt`). Read-only. Needs the eOverlays tool 0.12.0.
 
 ### Shift lights
 

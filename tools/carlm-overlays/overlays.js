@@ -856,6 +856,7 @@ function main() {
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
     let scanning = false;
+    const rec = finder.recorder({ dir: path.dirname(CTL) });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
@@ -902,6 +903,18 @@ function main() {
             peekTimer = q.on ? setTimeout(() => { peekTimer = null; redrawAll(); push(); }, PEEK_MS + 50) : null;
             log(`peek ${q.on ? 'on' : 'off'}`);
             redrawAll(); push();
+        } else if (q.op === 'record' && (q.phase === 'start' || q.phase === 'stop')) {
+            // the Finder's Record: the files that change while the user flips "track my car" (read-only)
+            const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
+            if (q.phase === 'start') {
+                send({ recording: 'quiet' });
+                log('finder: recording, quiet window');
+                rec.start((e, n) => { log(`finder: ${e ? e.message : `ready (${n} noisy files)`}`); send(e ? { error: e.message } : { recording: 'flip', noise: n }); });
+            } else {
+                send({ recording: 'listing' });
+                rec.stop((e, r) => { log(`finder: ${e ? e.message : `${r.total} files changed`}`); send(e ? { error: e.message } : r); },
+                    path.join(path.dirname(DATA), 'finder-record.txt'));
+            }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
             if (scanning) return;
             scanning = true;
