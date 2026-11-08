@@ -53,7 +53,10 @@ const OFFSETS = [0, 3000];                   // an app's RHMI application agains
 // the button's centre on every button (not mirrored): heat 864-983 (21 px right of a temperature), ventilation
 // 222-341 / 1844-1963 (24 px left of one), measured with the HMI's own icons on; passenger heat by the driver's
 const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685], slotW: 140, buttonW: 120,
-    buttons: { 'driver.wheel': 20, 'driver.cool': 222, 'driver.heat': 864, 'passenger.cool': 1844, 'passenger.heat': 2486 },
+    // the seat buttons 24 px right of IterioDev's measure: there the HMI's own button and accent line sit (this car,
+    // video 2026-11-08: its line ran on past ours, the press box covered only part of the button and a tap at its right
+    // end reached the HMI, which opened its seat panel)
+    buttons: { 'driver.wheel': 20, 'driver.cool': 246, 'driver.heat': 888, 'passenger.cool': 1868, 'passenger.heat': 2510 },
     iconY: 55, lineY: 99, lineH: 6 };
 // IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
 // against the accent line, so the icon sits centred over it
@@ -460,7 +463,8 @@ function tint(img, rgb) {                            // the HMI's icons are grey
 const BAR_BG = [1, 4, 8], DIM_SEG = [80, 86, 94], SEG_GAP = 6;
 function drawButton(px, L, kind, img, level, pressed, max, dy) {
     const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED;
-    if (pressed) blend(px, BW, 0, 0, pill(BW, L.h, 6, 16, 0.18), 1);
+    // pressed: a soft box over the button, above its accent line, like the HMI's own
+    if (pressed) blend(px, BW, 4, 8, pill(BW - 8, L.lineY - 14, 0, 14, 0.14), 1);
     if (img) {
         const cx = BW / 2 + ICON_DX;
         blend(px, BW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
@@ -952,22 +956,22 @@ function test() {
     // buttons: only what the car has and the settings allow, in the HMI's spots
     const keys = (st, set) => buttons(LAYOUT, st, set).map((b) => b.key + '@' + b.x).join(' ');
     const all = seats.state(true);
-    assert.strictEqual(keys(all, SETTINGS), 'driver.wheel@20 driver.cool@222 driver.heat@864 passenger.cool@1844 passenger.heat@2486');
+    assert.strictEqual(keys(all, SETTINGS), 'driver.wheel@20 driver.cool@246 driver.heat@888 passenger.cool@1868 passenger.heat@2510');
     const heatOnly = seats.state(false);
     heatOnly.seats.driver.heat.have = heatOnly.seats.passenger.heat.have = true;
-    assert.strictEqual(keys(heatOnly, SETTINGS), 'driver.heat@864 passenger.heat@2486');
+    assert.strictEqual(keys(heatOnly, SETTINGS), 'driver.heat@888 passenger.heat@2510');
     assert.strictEqual(keys(all, mergeSettings(SETTINGS, { seats: false })), 'driver.wheel@20');
-    assert.strictEqual(keys(all, mergeSettings(SETTINGS, { wheel: false, seats: 'no' })), 'driver.cool@222 driver.heat@864 passenger.cool@1844 passenger.heat@2486');
+    assert.strictEqual(keys(all, mergeSettings(SETTINGS, { wheel: false, seats: 'no' })), 'driver.cool@246 driver.heat@888 passenger.cool@1868 passenger.heat@2510');
     // a right-hand drive car: the driver's buttons in the right-hand spots, the passenger's left, the wheel at the far right
     const rhd = mergeSettings(SETTINGS, { side: 'right' });
-    assert.strictEqual(keys(all, rhd), 'driver.wheel@2740 driver.cool@1844 driver.heat@2486 passenger.cool@222 passenger.heat@864');
+    assert.strictEqual(keys(all, rhd), 'driver.wheel@2740 driver.cool@1868 driver.heat@2510 passenger.cool@246 passenger.heat@888');
     assert.deepStrictEqual([spotSeat('driver', 'right'), spotSeat('passenger', 'right'), spotSeat('driver', 'left')], ['passenger', 'driver', 'driver']);
     assert.strictEqual(mergeSettings(rhd, { side: 'middle' }).side, 'right', 'a bad side: kept');
     // alignment: per button plus 'all', x moves the button (kept on the bar), clamped; partial updates keep the other axis
     const al = mergeSettings(SETTINGS, { align: { 'driver.heat': { x: 7, y: -3 }, all: { x: -2 }, 'passenger.cool': { x: 999, y: 'no' }, bogus: { x: 1 } } });
     assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, y: -3 }, { x: -2, y: 0 }, { x: 120, y: 0 }, undefined]);
     assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, y: -3 });
-    assert.strictEqual(keys(heatOnly, al), 'driver.heat@869 passenger.heat@2484');
+    assert.strictEqual(keys(heatOnly, al), 'driver.heat@893 passenger.heat@2508');
     assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, y: 4 });
     assert.strictEqual(keys(all, mergeSettings(SETTINGS, { align: { 'driver.wheel': { x: -100 } } })).split(' ')[0], 'driver.wheel@0', 'kept on the bar');
     assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, y: 0 }, 'defaults: centred');
@@ -980,8 +984,8 @@ function test() {
     // per-button choice: 'on' shows what the car doesn't report, 'off' hides what it does (an M2 without ventilation that
     // reports it: the client's car, 2026-11-04); bad values are ignored
     const s3 = mergeSettings(SETTINGS, { show: { 'driver.cool': 'off', 'passenger.cool': 'off', 'driver.wheel': 'maybe', x: 'on' } });
-    assert.strictEqual(keys(all, s3), 'driver.wheel@20 driver.heat@864 passenger.heat@2486');
-    assert.strictEqual(keys(heatOnly, mergeSettings(SETTINGS, { show: { 'driver.wheel': 'on', 'passenger.heat': 'off' } })), 'driver.wheel@20 driver.heat@864');
+    assert.strictEqual(keys(all, s3), 'driver.wheel@20 driver.heat@888 passenger.heat@2510');
+    assert.strictEqual(keys(heatOnly, mergeSettings(SETTINGS, { show: { 'driver.wheel': 'on', 'passenger.heat': 'off' } })), 'driver.wheel@20 driver.heat@888');
     // the old master switches: off -> that group 'off', switches back on (the app no longer shows them); new files keep theirs
     const mg = migrate(mergeSettings(SETTINGS, { seats: false, wheel: true }), { seats: false, wheel: true });
     assert.deepStrictEqual([mg.seats, mg.wheel, mg.show['driver.heat'], mg.show['passenger.cool'], mg.show['driver.wheel']], [true, true, 'off', 'off', 'auto']);
