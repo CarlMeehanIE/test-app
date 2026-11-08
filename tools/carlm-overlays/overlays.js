@@ -140,6 +140,9 @@ const mcarOf = (found, set) => (set.mmode.car === 'yes' ? true : set.mmode.car =
 const RED = [255, 48, 49], BLUE = [29, 120, 223], WHITE = [255, 255, 255];   // the HMI's accent colours
 const OFF_ALPHA = 0.6;
 const MODES = ['road', 'sport', 'track'];
+// the M Mode a start switches to once the cluster is up: 'car' leaves the car's own (mmode.start; it replaces
+// mmode.boot, true = 'sport')
+const STARTS = ['car'].concat(MODES);
 const SIDES = ['left', 'right'];                     // where the steering wheel is (LAYOUT is a left-hand drive car's)
 // alignment: a car whose bar is not where LAYOUT measured it (another HMI build, a right-hand drive car's mirrored bar):
 // px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
@@ -156,7 +159,7 @@ const alignOf = (set, key) => {
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0 }; return o; }, {}),
-    mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', boot: false, car: 'auto' }, shift: shift.DEFAULTS };
+    mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -290,7 +293,10 @@ function mergeSettings(cur, p) {
         });
     }
     if (p.mmode && typeof p.mmode === 'object') {
-        ['on', 'boot'].forEach((k) => { if (typeof p.mmode[k] === 'boolean') out.mmode[k] = p.mmode[k]; });
+        if (typeof p.mmode.on === 'boolean') out.mmode.on = p.mmode.on;
+        if (typeof p.mmode.boot === 'boolean') out.mmode.start = p.mmode.boot ? 'sport' : 'car';   // 0.6 and older, old apps
+        if (STARTS.indexOf(p.mmode.start) >= 0) out.mmode.start = p.mmode.start;
+        delete out.mmode.boot;
         ['m1', 'm2', 'off'].forEach((k) => { if (MODES.indexOf(p.mmode[k]) >= 0) out.mmode[k] = p.mmode[k]; });
         if (MCAR.indexOf(p.mmode.car) >= 0) out.mmode.car = p.mmode.car;
     }
@@ -738,7 +744,8 @@ function main() {
     function kombi(hex) {                             // Start in M SPORT (M cars): once the cluster is up, in its standard view
         const v = parseInt(hex.slice(0, 2), 16), up = clusterUp(k, hex);
         if (v !== k.view) { log(`cluster view ${k.view} -> ${v}`); k.view = v; }
-        if (up === 1 && mEff() && settings.mmode.boot) hmi('mmode sport').then((r) => log(`cluster up: mmode sport: ${r}`));
+        const start = settings.mmode.start;
+        if (up === 1 && mEff() && MODES.indexOf(start) >= 0) hmi(`mmode ${start}`).then((r) => log(`cluster up: mmode ${start}: ${r}`));
     }
     function subscribe() {
         if (st.backend !== 'demo') seats.SUBS.forEach((l) => hmi(l));
@@ -1009,11 +1016,15 @@ function test() {
     const ia = mergeSettings(SETTINGS, { align: { all: { ix: 2 }, 'driver.heat': { ix: -7 }, 'driver.cool': { ix: 99 } } });
     assert.deepStrictEqual([alignOf(ia, 'driver.heat').ix, alignOf(ia, 'driver.cool').ix, keys(heatOnly, ia)], [-5, 40, 'driver.heat@888 passenger.heat@2486'],
         'ix: the icon alone, the button stays');
+    // start-up M Mode: the car's own by default; road / sport / track; the old switch (boot) carried over; nonsense kept out
+    assert.deepStrictEqual([SETTINGS.mmode.start, mergeSettings(SETTINGS, { mmode: { start: 'track' } }).mmode.start,
+        mergeSettings(SETTINGS, { mmode: { boot: true } }).mmode.start, mergeSettings(SETTINGS, { mmode: { start: 'warp' } }).mmode.start,
+        'boot' in mergeSettings(SETTINGS, { mmode: { boot: true } }).mmode], ['car', 'track', 'sport', 'car', false]);
     // settings: known keys of the right kind only
     const s2 = mergeSettings(SETTINGS, { order: 'down', mmode: { m2: 'track', off: 'warp', on: false, boot: 1 }, extra: 1, shortcuts: 0,
         ambientHeat: 4, ambientCool: 13 });
     assert.deepStrictEqual(s2, { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 4, ambientCool: 9, order: 'down', side: 'left',
-        show: SETTINGS.show, align: SETTINGS.align, mmode: { on: false, m1: 'sport', m2: 'track', off: 'road', boot: false, car: 'auto' },
+        show: SETTINGS.show, align: SETTINGS.align, mmode: { on: false, m1: 'sport', m2: 'track', off: 'road', start: 'car', car: 'auto' },
         shift: shift.DEFAULTS });
     // per-button choice: 'on' shows what the car doesn't report, 'off' hides what it does (an M2 without ventilation that
     // reports it: the client's car, 2026-11-04); bad values are ignored
