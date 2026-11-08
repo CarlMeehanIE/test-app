@@ -1,7 +1,7 @@
 'use strict';
 /*
- * overlays.js - iteriodev-overlays: the QuickSelect strip (iDrive 8.5 style) on iDrive 8, root service, Node 8.
- * Drawn by mgu-render as an overlay over the climate bar (its overlay_apps must list iteriodev-overlays: always shown,
+ * overlays.js - carlm-overlays (from iteriodev-overlays, own ids beside it): the QuickSelect strip (iDrive 8.5 style) on iDrive 8, root service, Node 8.
+ * Drawn by mgu-render as an overlay over the climate bar (its overlay_apps must list carlm-overlays: always shown,
  * touch first, may claim the climate bar). One layer, the bar's width:
  *   four shortcuts, two left and two right of CLIMATE MENU
  *     tap         opens the slot's screen: HMIControl2.requestGraphicalContext through `hmictl serve`
@@ -17,7 +17,7 @@
  *     whole button (icon, accent line, touch area) left / right, y moves its icon up / down; px, added to LAYOUT
  *   M1 / M2 on the steering wheel (M cars): an M setup switched on also switches the M Mode (cluster, HUD, as the M
  *     Mode panel's button: `hmictl mmode sport`), switched off back; which mode for each: the settings
- * The Overlays app (iteriodev_overlays) is its control panel: a JSON-lines socket (CTL) with the settings, the slots,
+ * The Overlays app (carlm_overlays) is its control panel: a JSON-lines socket (CTL) with the settings, the slots,
  * what the car has and the screens a slot can open; every change is pushed to it.
  * A slot is a graphical context. An OAP app's screens sit at its installed rhmiData/application.json appletId
  * (+ 3000 with the oap-sdk's offset; MainApp / mgu-deploy give the id at install and keep it on updates), so an app
@@ -26,7 +26,7 @@
  * icons can't be drawn here, so those apps, and BMW screens the strip has no icon for, get a plain one.
  * A slot's own icon (slot.icon, picked in the app; ICON_LIB, icons/lib/<name>.png) replaces its picture in the strip; it
  * stays with the slot when what it opens changes (a hold, the app's picker), until set back to the default (null).
- * Data: /var/opt/iteriodev-overlays/slots.json { slots: [4 x {state, applet} | {app, state, offset}, + icon?], settings, mcar,
+ * Data: /var/opt/carlm-overlays/slots.json { slots: [4 x {state, applet} | {app, state, offset}, + icon?], settings, mcar,
  * learned, vents (legacy cars: ventilation seen on, per seat), layout? }. VM ids (2026-11-01): Media 2 23, Nav 1 32, Phone 24 34, All apps 20 4, Home 20000 4, Climate 3 517.
  *   node overlays.js          the service (OVERLAYS_SEAT_DEMO=1: seats without a car, for the VM)
  *   node overlays.js --test   the self-check (no car needed)
@@ -39,13 +39,13 @@ const png = require('./png');
 const seats = require('./seats');
 const shift = require('./shiftlights');
 
-const DATA = process.env.OVERLAYS_DATA || '/var/opt/iteriodev-overlays/slots.json';
-const CTL = process.env.OVERLAYS_CTL || '/run/iteriodev-overlays/ctl.sock';
+const DATA = process.env.OVERLAYS_DATA || '/var/opt/carlm-overlays/slots.json';
+const CTL = process.env.OVERLAYS_CTL || '/run/carlm-overlays/ctl.sock';
 const OAP = process.env.OVERLAYS_OAP || '/var/opt/public/oap';
 const CLIENT = process.env.MGU_RENDER_CLIENT || '/var/opt/mgu-render/current/mgu_render_client.js';
 const CLUSTER = process.env.CLUSTER_RENDER_CLIENT || '/var/opt/cluster-render/current/cluster_render_client.js';
 const HMICTL = path.join(__dirname, 'hmictl');
-const SELF = 'iteriodev_overlays';               // the control-panel app: not offered as a slot
+const SELF = 'carlm_overlays';               // the control-panel app: not offered as a slot
 const HOLD_MS = 1000, PENDING_MS = 3000, REREAD_MS = 60000;
 const OFFSETS = [0, 3000];                   // an app's RHMI application against its appletId (oap-sdk)
 // screen px. The M4's bar (screenshots 2026-11-02 / -03): temperatures 365-843 | 1987-2465, CLIMATE MENU 1386-1495.
@@ -474,7 +474,7 @@ function main() {
     Object.assign(st.legacy.seen, conf.vents);
     let ventsSaved = JSON.stringify(st.legacy.seen);
     const pending = {};                               // pending['driver.heat'] = { level, until }
-    const gpu = new RenderClient('iteriodev-overlays', { info: log, warn: log, error: log });
+    const gpu = new RenderClient('carlm-overlays', { info: log, warn: log, error: log });
     const PIX = { 'driver.wheel': 5, 'driver.cool': 6, 'driver.heat': 7, 'passenger.cool': 8, 'passenger.heat': 9 };
 
     function picture(ic, cb, max) {                   // a decoded, fitted picture; cached by file + mtime
@@ -635,7 +635,7 @@ function main() {
         if (fs.existsSync(CLUSTER)) {
             try {
                 const { ClusterRender } = require(CLUSTER);
-                cr = new ClusterRender('iteriodev-overlays');
+                cr = new ClusterRender('carlm-overlays');
                 Object.keys(shift.TARGETS).forEach((t) => {
                     const g = shift.TARGETS[t];
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });

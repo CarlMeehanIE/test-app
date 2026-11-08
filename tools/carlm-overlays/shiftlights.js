@@ -1,6 +1,6 @@
 'use strict';
 /*
- * shiftlights.js - iteriodev-overlays: shift lights on the instrument cluster for any car (iDrive 8), M or not,
+ * shiftlights.js - carlm-overlays: shift lights on the instrument cluster for any car (iDrive 8), M or not,
  * drawn by cluster-render (robertnisipeanu/idrive-apps) as effect layers: in its target `guide`, the cluster's
  * guiding-panel area, top centre over the map (Ca_GuidingPanel_IC, 702x213), and on cars without their own (not M)
  * in `hud`, the head-up display above its speed bar (Ca_ComCenter_HUD, 353x203). Both are shown by the cluster as

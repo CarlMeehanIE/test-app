@@ -1,6 +1,6 @@
 'use strict';
 /*
- * seats.js - iteriodev-overlays: front seat heating / ventilation read and set over SOME/IP the way Hmi8 does it,
+ * seats.js - carlm-overlays: front seat heating / ventilation read and set over SOME/IP the way Hmi8 does it,
  * through whichever backend the car's climate unit offers (Hmi8: CDevCarClimateMaster / CDevCarClimateLegacy).
  * Pure: hmictl "ev" lines and getter replies -> a state; a seat's new level -> an hmictl line. overlays.js draws.
  * ClimateMaster 0xB09A inst 1 v1 (newer climate units):

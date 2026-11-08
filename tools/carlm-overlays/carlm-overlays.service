@@ -4,11 +4,11 @@ After=vsomeipd.service mgu-render.socket
 
 [Service]
 # root: the vsomeip policy lets uid 0 call the HMI's HMIControl2 / HMIContext2 and MainApp's AppStart; mgu-render
-# lets only root clients be overlays. Slots in /var/opt/iteriodev-overlays/slots.json (kept over updates).
-# the Overlays app's control socket: /run/iteriodev-overlays/ctl.sock (0666, the app runs as its own uid)
-RuntimeDirectory=iteriodev-overlays
+# lets only root clients be overlays. Slots in /var/opt/carlm-overlays/slots.json (kept over updates).
+# the Overlays app's control socket: /run/carlm-overlays/ctl.sock (0666, the app runs as its own uid)
+RuntimeDirectory=carlm-overlays
 RuntimeDirectoryMode=0755
-ExecStart=/usr/bin/node /var/opt/iteriodev-overlays/current/overlays.js
+ExecStart=/usr/bin/node /var/opt/carlm-overlays/current/overlays.js
 # the car's system.conf has DefaultStandardOutput=null: the log would never reach the journal
 StandardOutput=journal
 Restart=always

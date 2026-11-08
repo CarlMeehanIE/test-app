@@ -18,8 +18,8 @@
    "path": "tools/iteriodev-drplay"
   },
   {
-   "id": "iteriodev-overlays",
-   "path": "tools/iteriodev-overlays"
+   "id": "carlm-overlays",
+   "path": "tools/carlm-overlays"
   },
   {
    "id": "iteriodev-screencast",
