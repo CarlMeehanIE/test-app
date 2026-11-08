@@ -466,6 +466,23 @@ function tint(img, rgb) {                            // the HMI's icons are grey
 /* on, the accent line shows the level: `max` segments, `level` of them lit, the rest dim; over the bar's own colour,
  * so the HMI's full line under it doesn't show through (one segment: the whole line, the wheel's on / off) */
 const BAR_BG = [1, 4, 8], DIM_SEG = [80, 86, 94], SEG_GAP = 6;
+// the HMI's bars end in a slant, "/" (the top edge longer): each segment a parallelogram leaning right by SLANT px over
+// the line's height (photo 2026-11-08: the cut ~0.4 of the bar's height)
+const SLANT = 3;
+/* a w x h parallelogram, top edge [s, w], bottom [0, w - s], edges anti-aliased, as a straight image */
+function slantBar(w, h, s, rgb) {
+    const data = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) {
+        const t = h > 1 ? y / (h - 1) : 0, xl = s * (1 - t), xr = w - s * t;      // row y's span
+        for (let x = 0; x < w; x++) {
+            const cov = Math.max(0, Math.min(x + 1, xr) - Math.max(x, xl));
+            if (cov <= 0) continue;
+            const i = (y * w + x) * 4;
+            data[i] = rgb[0]; data[i + 1] = rgb[1]; data[i + 2] = rgb[2]; data[i + 3] = Math.round(255 * Math.min(1, cov));
+        }
+    }
+    return { w, h, data };
+}
 function drawButton(px, L, kind, img, level, pressed, max, dy, dx) {
     const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED;
     // pressed: a soft box over the button, above its accent line, like the HMI's own
@@ -479,7 +496,7 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx) {
     blend(px, BW, 0, L.lineY, pill(BW, L.lineH, 0, 0, 1, BAR_BG), 1);
     for (let i = 0; i < n; i++) {
         const x0 = Math.round(i * (sw + SEG_GAP)), x1 = Math.round(i * (sw + SEG_GAP) + sw);
-        blend(px, BW, x0, L.lineY, pill(x1 - x0, L.lineH, 0, 0, 1, i < level ? rgb : DIM_SEG), 1);
+        blend(px, BW, x0, L.lineY, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
     }
 }
 
@@ -1074,7 +1091,11 @@ function test() {
     const btn = (kind, level, max) => { const px = Buffer.alloc(LAYOUT.buttonW * LAYOUT.h * 4); drawButton(px, LAYOUT, kind, icon, level, false, max); return px; };
     const at4 = (px, x, y) => Array.from(px.slice((y * LAYOUT.buttonW + x) * 4, (y * LAYOUT.buttonW + x) * 4 + 4));
     const heatOn = btn('heat', 2, 3), coolOn = btn('cool', 1, 3), heatOff = btn('heat', 0, 3), wheelOn = btn('wheel', 1, 1);
-    assert.deepStrictEqual(at4(heatOn, 0, LAYOUT.lineY), RED.concat(255), 'heat on: red line from the button\'s left');
+    const lineBottom = LAYOUT.lineY + LAYOUT.lineH - 1;
+    assert.deepStrictEqual(at4(heatOn, 0, lineBottom), RED.concat(255), 'heat on: red line from the button\'s left (bottom row)');
+    // the slant "/": top row starts SLANT px in and runs to the segment's end, the bottom row the other way round
+    assert.deepStrictEqual([at4(heatOn, 0, LAYOUT.lineY), at4(heatOn, 35, LAYOUT.lineY), at4(heatOn, 35, lineBottom)],
+        [BAR_BG.concat(255), RED.concat(255), BAR_BG.concat(255)], 'segments lean right like the HMI\'s bars');
     // the level: 3 segments of 36 px, 6 px apart (0-35, 42-77, 84-119); the gaps the bar's colour (the HMI's line hidden)
     assert.deepStrictEqual([at4(heatOn, 50, LAYOUT.lineY), at4(heatOn, 100, LAYOUT.lineY), at4(heatOn, 38, LAYOUT.lineY)],
         [RED.concat(255), DIM_SEG.concat(255), BAR_BG.concat(255)], 'heat 2 of 3: two red segments, one dim');
