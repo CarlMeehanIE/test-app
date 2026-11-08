@@ -24,7 +24,9 @@
  * slot keeps the app's id and the offset and reads the appletId again on every tap. The app's picture is its tile
  * icon (application.json entryPoints[0].icon, a PNG in rhmiData) or its package icon.png; BMW's own gid:// tile
  * icons can't be drawn here, so those apps, and BMW screens the strip has no icon for, get a plain one.
- * Data: /var/opt/iteriodev-overlays/slots.json { slots: [4 x {state, applet} | {app, state, offset}], settings, mcar,
+ * A slot's own icon (slot.icon, picked in the app; ICON_LIB, icons/lib/<name>.png) replaces its picture in the strip; it
+ * stays with the slot when what it opens changes (a hold, the app's picker), until set back to the default (null).
+ * Data: /var/opt/iteriodev-overlays/slots.json { slots: [4 x {state, applet} | {app, state, offset}, + icon?], settings, mcar,
  * learned, vents (legacy cars: ventilation seen on, per seat), layout? }. VM ids (2026-11-01): Media 2 23, Nav 1 32, Phone 24 34, All apps 20 4, Home 20000 4, Climate 3 517.
  *   node overlays.js          the service (OVERLAYS_SEAT_DEMO=1: seats without a car, for the VM)
  *   node overlays.js --test   the self-check (no car needed)
@@ -66,6 +68,50 @@ const SCREENS = [
     { title: 'Home', state: 20000, applet: 4, png: 'home', icon: 'MainMenu' },
     { title: 'Climate', state: 3, applet: 517, png: 'climate', icon: 'Fan' },
 ];
+// the icons a slot can wear instead of its own picture: icons/lib/<name>.png, 84 px, #f0f0f0 like icons/*.png. Material
+// Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto and Waze, Simple Icons (CC0): icons/lib/LICENSE
+const ICON_LIB = [
+    ['android-auto', 'Android Auto'],
+    ['android', 'Android'],
+    ['music', 'Music'],
+    ['spotify', 'Spotify'],
+    ['podcast', 'Podcasts'],
+    ['radio', 'Radio'],
+    ['play-circle', 'Play'],
+    ['youtube', 'YouTube'],
+    ['navigation-variant', 'Navigation'],
+    ['map-marker', 'Map pin'],
+    ['google-maps', 'Google Maps'],
+    ['waze', 'Waze'],
+    ['home', 'Home'],
+    ['phone', 'Phone'],
+    ['message-text', 'Messages'],
+    ['account', 'Profile'],
+    ['car', 'Car'],
+    ['car-info', 'Car info'],
+    ['car-cog', 'Car settings'],
+    ['car-wrench', 'Service'],
+    ['engine', 'Engine'],
+    ['speedometer', 'Speedometer'],
+    ['car-battery', 'Battery'],
+    ['gas-station', 'Fuel'],
+    ['ev-station', 'Charging'],
+    ['tire', 'Tyres'],
+    ['thermometer', 'Temperature'],
+    ['fan', 'Fan'],
+    ['car-seat-heater', 'Seat heating'],
+    ['car-seat-cooler', 'Seat cooling'],
+    ['steering', 'Steering wheel'],
+    ['lightbulb', 'Light'],
+    ['palette', 'Colours'],
+    ['camera', 'Camera'],
+    ['video', 'Video'],
+    ['flag-checkered', 'Track'],
+    ['timer-outline', 'Timer'],
+    ['cog', 'Settings'],
+    ['view-grid', 'Apps'],
+];
+const iconName = (n) => (typeof n === 'string' && ICON_LIB.some((x) => x[0] === n) ? n : null);
 let learned = {};                                    // title -> { state, applet } this car's HMI uses instead
 const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}, s, learned[s.title]) : s));
 const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps'];
@@ -172,6 +218,8 @@ function target(slot, apps) {
 }
 /* a slot -> its picture: { builtin: name } or { file } (+ missing for an app that is gone) */
 function iconOf(slot, apps) {
+    const own = iconName(slot.icon);
+    if (own) return Object.assign({ builtin: 'lib/' + own }, slot.app && !apps.some((x) => x.id === slot.app) ? { missing: true } : {});
     if (!slot.app) { const s = screenList().find((x) => x.state === slot.state && x.applet === slot.applet); return { builtin: s ? s.png : 'screen' }; }
     const a = apps.find((x) => x.id === slot.app);
     if (!a) return { builtin: 'app', missing: true };
@@ -208,10 +256,10 @@ function appInfo(a) {
 function describe(slot, apps) {
     if (slot.app) {
         const a = apps.find((x) => x.id === slot.app), i = a && appInfo(a);
-        return { kind: 'app', app: slot.app, title: i ? i.title : slot.app, missing: !a };
+        return Object.assign({ kind: 'app', app: slot.app, title: i ? i.title : slot.app, missing: !a }, iconName(slot.icon) ? { own: slot.icon } : {});
     }
     const s = screenList().find((x) => x.state === slot.state && x.applet === slot.applet);
-    return { kind: 'bmw', title: s ? s.title : 'BMW screen', icon: s ? s.icon : 'Display' };
+    return Object.assign({ kind: 'bmw', title: s ? s.title : 'BMW screen', icon: s ? s.icon : 'Display' }, iconName(slot.icon) ? { own: slot.icon } : {});
 }
 /* settings from the app (or the file): only known keys of the right kind; the rest stays */
 function mergeSettings(cur, p) {
@@ -252,6 +300,7 @@ function loadData(file) {
     learned = lr;
     const vents = {};                                  // legacy cars: seats whose ventilation was seen on (seats.js)
     seats.SEATS.forEach((s) => { if (j.vents && j.vents[s] === true) vents[s] = true; });
+    if (good) j.slots.forEach((sl) => { if (sl.icon !== undefined && !iconName(sl.icon)) delete sl.icon; });   // an icon this version lacks
     return { slots: good ? j.slots : defaults(), layout: j.layout, learned: lr, settings: migrate(mergeSettings(SETTINGS, j.settings), j.settings),
         mcar: j.mcar === true, vents };
 }
@@ -695,6 +744,7 @@ function main() {
         log(`slot ${i}: open ${s.app || 'screen'} ${t.state} ${t.applet}: ${r}`);
     }
     function setSlot(i, s) {
+        if (slots[i] && iconName(slots[i].icon) && s.icon === undefined) s = Object.assign({}, s, { icon: slots[i].icon });   // its icon stays
         slots[i] = s;
         save();
         log(`slot ${i}: saved ${JSON.stringify(s)}`);
@@ -758,6 +808,18 @@ function main() {
         } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && slotOk(q.target)) {
             const t = q.target;
             setSlot(q.i, t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet });
+        } else if (q.op === 'icon' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && (q.icon === null || iconName(q.icon))) {
+            const sl = Object.assign({}, slots[q.i]);
+            if (q.icon) sl.icon = q.icon; else delete sl.icon;
+            slots[q.i] = sl;
+            log(`slot ${q.i}: icon ${q.icon || 'default'}`);
+            save(); drawSlot(q.i); push();
+        } else if (q.op === 'icons') {
+            c.write(JSON.stringify({ icons: ICON_LIB.map(([name, title]) => {
+                let pic = null;
+                try { pic = fs.readFileSync(path.join(__dirname, 'icons', 'lib', name + '.png')).toString('base64'); } catch (e) { /* not installed */ }
+                return { name, title, pic };
+            }) }) + '\n');
         } else if (q.op === 'reset') {
             slots = defaults();
             save(); redrawAll(); push();
@@ -862,6 +924,13 @@ function test() {
     assert.deepStrictEqual(describe({ state: 1, applet: 32 }, []), { kind: 'bmw', title: 'Navigation', icon: 'Navigation' });
     assert.deepStrictEqual(describe({ state: 9, applet: 77 }, []), { kind: 'bmw', title: 'BMW screen', icon: 'Display' });
     assert.deepStrictEqual(describe({ app: 'gone', state: 1, offset: 0 }, []), { kind: 'app', app: 'gone', title: 'gone', missing: true });
+    // a slot's own icon: wins over its picture (dimmed when its app is gone), unknown names ignored, kept in describe()
+    assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'android-auto' }, []), { builtin: 'lib/android-auto' });
+    assert.deepStrictEqual(iconOf({ app: 'gone', state: 1, offset: 0, icon: 'music' }, []), { builtin: 'lib/music', missing: true });
+    assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'nope' }, []), { builtin: 'media' });
+    assert.strictEqual(describe({ state: 2, applet: 23, icon: 'waze' }, []).own, 'waze');
+    assert.strictEqual(describe({ state: 2, applet: 23, icon: 'nope' }, []).own, undefined);
+    ICON_LIB.forEach(([n]) => assert(fs.existsSync(path.join(__dirname, 'icons', 'lib', n + '.png')), `icons/lib/${n}.png`));
     // buttons: only what the car has and the settings allow, in the HMI's spots
     const keys = (st, set) => buttons(LAYOUT, st, set).map((b) => b.key + '@' + b.x).join(' ');
     const all = seats.state(true);

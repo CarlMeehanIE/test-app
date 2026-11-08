@@ -1,8 +1,8 @@
-# Overlays
+# eOverlays
 
-Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
+Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
 
-Version 1.4.0 · iDrive 8 only · package `iteriodev_overlays` · [all apps and how to install](../../README.md)
+Version 1.5.0 · iDrive 8 only · package `iteriodev_overlays` · [all apps and how to install](../../README.md)
 
 > [!NOTE]
 > The strip in the climate bar is car-tested (G82); the app's pages are not yet. Needs the Overlays tool (the Store installs it with the app).
@@ -22,6 +22,12 @@ The four slots next to *CLIMATE MENU*; tap one to change it.
 ![Picking a slot](screenshots/pick.png)
 
 BMW screens or the apps on this car.
+
+### Shortcut icons
+
+![Shortcut icons](screenshots/icons.png)
+
+*Icon in the bar* on the Shortcuts page: the picture a shortcut shows in the climate bar, instead of the screen's own (39 icons: Android Auto, Spotify, Waze, Google Maps, YouTube, car and comfort icons). It stays with the shortcut when you change what it opens; *Default* goes back to the screen's own picture. For an Android Auto shortcut: open Android Auto, hold the shortcut 1 s, then pick its icon. Icons: Material Design Icons (Apache-2.0) and Simple Icons (CC0). Needs the Overlays tool 0.6.0.
 
 ### Climate
 

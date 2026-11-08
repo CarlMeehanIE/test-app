@@ -1,4 +1,4 @@
-# Tailscale
+# eTailscale
 
 Log the head unit in to your tailnet without a computer: shows Tailscale's state, the login link as a QR code to scan with your phone, the head unit's tailnet name and address, Rename (default mgu) and Log out. Needs the Tailscale tool from the same source.
 

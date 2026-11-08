@@ -1,4 +1,4 @@
-# Live Adjustments
+# eLive Adjustments
 
 Live adjustments for an MHD-tuned DME: switch engine maps 1-4 at any time, also while driving, MHD Max Cooling on (engine running) or off, and open or close the exhaust flap (MHD's own flap control, held while driving; without MHD, BMW's DME job, which the DME takes back after about 20 s or when the car moves). Map and cooling show what the DME accepted: MHD has no read-back.
 

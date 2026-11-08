@@ -1,4 +1,4 @@
-# Drag Timer
+# eDrag Timer
 
 Acceleration timer: stand still, launch, and it times the run with splits and a speed-over-time chart, timed from the launch. Power run: floor it in one gear for power and torque over rpm, with a baseline to compare. Keeps your best times; km/h or mph.
 

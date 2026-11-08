@@ -1,4 +1,4 @@
-# Seats
+# eSeats
 
 Move the driver and passenger seats from the central display, also while driving (as with the seats' own switches, for a passenger who can't reach theirs), both on one page: each seat seen from the side with its controls round it (fore / aft, height, backrest, tilt and headrest, while you hold them), three memories per seat under it (for cars without memory buttons too), and the Gentleman button (parked only) that moves the passenger seat out of the way and back. The seat's own switches always win. Needs the Comfort tool (the Store installs it with the app).
 

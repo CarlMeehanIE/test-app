@@ -1,4 +1,4 @@
-# Fault Codes
+# eFault Codes
 
 Reads the fault memory of every control unit in the car and shows each fault with its text; clears it when you ask. Also lists the car's Check Control messages.
 

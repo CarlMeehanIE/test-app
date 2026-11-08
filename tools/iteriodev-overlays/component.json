@@ -1,9 +1,9 @@
 {
   "id": "iteriodev-overlays",
   "kind": "tool",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "title": "Overlays",
-  "description": "QuickSelect strip (iDrive 8.5 style) in the climate bar: four shortcuts (tap opens, hold 1 s saves the screen you are on), seat heating / ventilation in the HMI's own spots, steering wheel heating, M1 / M2 switch the M Mode; each seat / wheel button can be nudged into place (the app's Align page); shift lights on the cluster for cars without their own (not M cars; with Cluster renderer 0.3.6 or newer). Set up in the Overlays app. Needs Renderer (mgu-render) 0.6.10 or newer.",
+  "description": "QuickSelect strip (iDrive 8.5 style) in the climate bar: four shortcuts, each with its own icon if picked (tap opens, hold 1 s saves the screen you are on), seat heating / ventilation in the HMI's own spots, steering wheel heating, M1 / M2 switch the M Mode; each seat / wheel button can be nudged into place (the app's Align page); shift lights on the cluster for cars without their own (not M cars; with Cluster renderer 0.3.6 or newer). Set up in the Overlays app. Needs Renderer (mgu-render) 0.6.10 or newer.",
   "optional": true,
   "uninstallable": true,
   "mguHmi": [
@@ -102,6 +102,206 @@
     {
       "path": "icons/hmi-wheel.png",
       "from": "icons/hmi-wheel.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/android-auto.png",
+      "from": "icons/lib/android-auto.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/android.png",
+      "from": "icons/lib/android.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/music.png",
+      "from": "icons/lib/music.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/spotify.png",
+      "from": "icons/lib/spotify.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/podcast.png",
+      "from": "icons/lib/podcast.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/radio.png",
+      "from": "icons/lib/radio.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/play-circle.png",
+      "from": "icons/lib/play-circle.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/youtube.png",
+      "from": "icons/lib/youtube.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/navigation-variant.png",
+      "from": "icons/lib/navigation-variant.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/map-marker.png",
+      "from": "icons/lib/map-marker.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/google-maps.png",
+      "from": "icons/lib/google-maps.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/waze.png",
+      "from": "icons/lib/waze.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/home.png",
+      "from": "icons/lib/home.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/phone.png",
+      "from": "icons/lib/phone.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/message-text.png",
+      "from": "icons/lib/message-text.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/account.png",
+      "from": "icons/lib/account.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car.png",
+      "from": "icons/lib/car.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-info.png",
+      "from": "icons/lib/car-info.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-cog.png",
+      "from": "icons/lib/car-cog.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-wrench.png",
+      "from": "icons/lib/car-wrench.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/engine.png",
+      "from": "icons/lib/engine.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/speedometer.png",
+      "from": "icons/lib/speedometer.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-battery.png",
+      "from": "icons/lib/car-battery.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/gas-station.png",
+      "from": "icons/lib/gas-station.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/ev-station.png",
+      "from": "icons/lib/ev-station.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/tire.png",
+      "from": "icons/lib/tire.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/thermometer.png",
+      "from": "icons/lib/thermometer.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/fan.png",
+      "from": "icons/lib/fan.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-seat-heater.png",
+      "from": "icons/lib/car-seat-heater.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/car-seat-cooler.png",
+      "from": "icons/lib/car-seat-cooler.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/steering.png",
+      "from": "icons/lib/steering.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/lightbulb.png",
+      "from": "icons/lib/lightbulb.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/palette.png",
+      "from": "icons/lib/palette.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/camera.png",
+      "from": "icons/lib/camera.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/video.png",
+      "from": "icons/lib/video.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/flag-checkered.png",
+      "from": "icons/lib/flag-checkered.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/timer-outline.png",
+      "from": "icons/lib/timer-outline.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/cog.png",
+      "from": "icons/lib/cog.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/view-grid.png",
+      "from": "icons/lib/view-grid.png",
+      "mode": "0644"
+    },
+    {
+      "path": "icons/lib/LICENSE",
+      "from": "icons/lib/LICENSE",
       "mode": "0644"
     }
   ],

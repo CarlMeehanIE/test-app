@@ -1,4 +1,4 @@
-# Ambient Light
+# eAmbient Light
 
 Any colour on the interior ambient light, not only the car's own presets, on one screen: your car's zones in a list (dash, doors, footwell, console, seats, roof: the ones it has), a colour bar for any shade, brightness (or follow the car's, dimmer at night), the car's colours as starting points and six presets of your own that keep every zone's colour. Each zone can follow the main colour, have its own, or keep the car's. A zone with two kinds of light (an X6's dash: a line above, decor below) shows as two rows, each with its own colour. Works while the car's own ambient light is switched on. Needs the Comfort tool (the Store installs it with the app).
 
