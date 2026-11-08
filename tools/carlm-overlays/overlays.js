@@ -76,10 +76,11 @@ const SCREENS = [
     { title: 'Climate', state: 3, applet: 517, png: 'climate', icon: 'Fan' },
 ];
 // the icons a slot can wear instead of its own picture: icons/lib/<name>.png, 84 px, #f0f0f0 like icons/*.png. Material
-// Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto and Waze, Simple Icons (CC0); first the iDrive 8.5
+// Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto (white, and in its colours) and Waze, Simple Icons (CC0); first the iDrive 8.5
 // quick-select set (media, nav, home, apps, phone: the strip's own icons/*.png; fan: MDI at their size): icons/lib/LICENSE
 const ICON_LIB = [
     ['android-auto', 'Android Auto'],
+    ['android-auto-color', 'Android Auto colour'],
     ['media', 'Media'],
     ['nav', 'Navigation'],
     ['fan', 'Climate'],
@@ -90,7 +91,6 @@ const ICON_LIB = [
     ['spotify', 'Spotify'],
     ['podcast', 'Podcasts'],
     ['radio', 'Radio'],
-    ['play-circle', 'Play'],
     ['youtube', 'YouTube'],
     ['map-marker', 'Map pin'],
     ['google-maps', 'Google Maps'],
