@@ -55,7 +55,9 @@ const OFFSETS = [0, 3000];                   // an app's RHMI application agains
 const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685], slotW: 140, buttonW: 120,
     buttons: { 'driver.wheel': 20, 'driver.cool': 222, 'driver.heat': 864, 'passenger.cool': 1844, 'passenger.heat': 2486 },
     iconY: 55, lineY: 99, lineH: 6 };
-const ICON_DX = 24;
+// IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
+// against the accent line, so the icon sits centred over it
+const ICON_DX = 0;
 // the BMW screens the app offers (a slot can hold any other one, saved by a hold): strip picture, the app's icon.
 // The ids are the VM's (mgu-m4's HMI). Another HMI build can number a screen differently (a client's M2, 2026-11-04:
 // Navigation did nothing): a tap that leaves the screen as it was counts as failed, and a hold soon after it learns the
@@ -1043,10 +1045,10 @@ function test() {
     assert.deepStrictEqual([at4(coolOn, 0, LAYOUT.lineY + 5), at4(coolOn, 60, LAYOUT.lineY)], [BLUE.concat(255), DIM_SEG.concat(255)], 'vent 1 of 3');
     assert.deepStrictEqual(at4(wheelOn, 60, LAYOUT.lineY), RED.concat(255), 'the wheel: one segment, the whole line');
     assert.deepStrictEqual(at4(heatOff, 0, LAYOUT.lineY), [0, 0, 0, 0], 'off: no line');
-    assert.deepStrictEqual(at4(heatOn, 84, LAYOUT.iconY), RED.concat(255), 'heat icon right of the centre (60 + 24)');
-    assert.deepStrictEqual(at4(heatOff, 84, LAYOUT.iconY).slice(3), [Math.round(255 * OFF_ALPHA)], 'off: white, dimmed');
-    assert.deepStrictEqual(at4(coolOn, 84, LAYOUT.iconY), BLUE.concat(255), 'vent icon right of the centre too');
-    assert.deepStrictEqual(at4(coolOn, 36, LAYOUT.iconY), [0, 0, 0, 0], '... not left of it');
+    assert.deepStrictEqual(at4(heatOn, 60, LAYOUT.iconY), RED.concat(255), 'heat icon centred over its line (60)');
+    assert.deepStrictEqual(at4(heatOff, 60, LAYOUT.iconY).slice(3), [Math.round(255 * OFF_ALPHA)], 'off: white, dimmed');
+    assert.deepStrictEqual(at4(coolOn, 60, LAYOUT.iconY), BLUE.concat(255), 'vent icon centred too');
+    assert.deepStrictEqual(at4(coolOn, 84, LAYOUT.iconY), [0, 0, 0, 0], '... not off to the right');
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
     seats.test();
