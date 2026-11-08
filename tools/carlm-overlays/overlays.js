@@ -38,6 +38,7 @@ const { spawn } = require('child_process');
 const png = require('./png');
 const seats = require('./seats');
 const shift = require('./shiftlights');
+const aa = require('./aa');
 
 const DATA = process.env.OVERLAYS_DATA || '/var/opt/carlm-overlays/slots.json';
 const CTL = process.env.OVERLAYS_CTL || '/run/carlm-overlays/ctl.sock';
@@ -80,7 +81,7 @@ const SCREENS = [
 // quick-select set (media, nav, home, apps, phone: the strip's own icons/*.png; fan: MDI at their size): icons/lib/LICENSE
 const ICON_LIB = [
     ['android-auto', 'Android Auto'],
-    ['android-auto-color', 'Android Auto colour'],
+    ['android-auto-color', 'Android Auto live'],
     ['media', 'Media'],
     ['nav', 'Navigation'],
     ['fan', 'Climate'],
@@ -119,6 +120,8 @@ const ICON_LIB = [
     ['timer-outline', 'Timer'],
     ['cog', 'Settings'],
 ];
+// "Android Auto live": in its colours while a phone's Android Auto is connected (aa.js), else the white one
+const AA_LIVE = 'android-auto-color', AA_OFF = 'android-auto';
 const iconName = (n) => (typeof n === 'string' && ICON_LIB.some((x) => x[0] === n) ? n : null);
 let learned = {};                                    // title -> { state, applet } this car's HMI uses instead
 const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}, s, learned[s.title]) : s));
@@ -231,8 +234,9 @@ function target(slot, apps) {
     return a ? { state: slot.state, applet: a.appletId + slot.offset } : null;
 }
 /* a slot -> its picture: { builtin: name } or { file } (+ missing for an app that is gone) */
-function iconOf(slot, apps) {
-    const own = iconName(slot.icon);
+function iconOf(slot, apps, live) {
+    let own = iconName(slot.icon);
+    if (own === AA_LIVE && live && !live.aa) own = AA_OFF;
     if (own) return Object.assign({ builtin: 'lib/' + own }, slot.app && !apps.some((x) => x.id === slot.app) ? { missing: true } : {});
     if (!slot.app) { const s = screenList().find((x) => x.state === slot.state && x.applet === slot.applet); return { builtin: s ? s.png : 'screen' }; }
     const a = apps.find((x) => x.id === slot.app);
@@ -518,6 +522,9 @@ function main() {
     let notice = null;                                // the last tap that did nothing: { slot, title, at }
     const boot = { since: 0, hmiAt: 0, up: false };    // BOOT: shown once up
     const st = seats.state(!!process.env.OVERLAYS_SEAT_DEMO);
+    const readAA = aa.reader();
+    let aaNow = { connected: false, via: null, pid: null };
+    const live = () => ({ aa: aaNow.connected });
     Object.assign(st.legacy.seen, conf.vents);
     let ventsSaved = JSON.stringify(st.legacy.seen);
     const pending = {};                               // pending['driver.heat'] = { level, until }
@@ -543,7 +550,7 @@ function main() {
         try { saveData(DATA, Object.assign(conf.layout ? { layout: conf.layout } : {}, { slots, settings, mcar, learned, vents: st.legacy.seen })); } catch (e) { log('save: ' + e.message); }
     };
     function drawSlot(i) {
-        const ic = iconOf(slots[i], apps);
+        const ic = iconOf(slots[i], apps, live());
         looks[i] = JSON.stringify(ic);
         picture(ic, (img) => {
             const px = Buffer.alloc(SW * H * 4);
@@ -841,7 +848,7 @@ function main() {
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
             mcar: mEff(), mfound: mcar, setups: m.sp21 ? 2 : 1 }, shift: sl.status(),
-        notice: notice && Date.now() - notice.at < REPAIR_MS ? notice : null, peek: peeking() } });
+        notice: notice && Date.now() - notice.at < REPAIR_MS ? notice : null, peek: peeking(), aa: aaNow } });
     function push() { const l = JSON.stringify(status()) + '\n'; clients.forEach((c) => c.write(l)); }
     function targets() {
         apps = installedApps(OAP);
@@ -944,8 +951,18 @@ function main() {
     setInterval(frame, 1000);                        // an app silent for 3 s is hidden
     setInterval(() => {                              // apps installed, updated or removed: new pictures
         apps = installedApps(OAP);
-        slots.forEach((s, i) => { if (JSON.stringify(iconOf(s, apps)) !== looks[i] && settings.shortcuts) drawSlot(i); });
+        slots.forEach((s, i) => { if (JSON.stringify(iconOf(s, apps, live())) !== looks[i] && settings.shortcuts) drawSlot(i); });
     }, 30000);
+    setInterval(() => {                              // Android Auto connected or not: the "live" icon follows
+        let r;
+        try { r = readAA(); } catch (e) { return; }
+        const was = aaNow.connected;
+        aaNow = r;
+        if (r.connected === was) return;
+        log(`android auto: ${r.connected ? `connected (${r.via})` : 'not connected'}`);
+        slots.forEach((s, i) => { if (s.icon === AA_LIVE && settings.shortcuts) drawSlot(i); });
+        push();
+    }, aa.POLL_MS);
     setInterval(reread, REREAD_MS);
     setInterval(sl.tick, 500);
     let tickAt = Date.now();
@@ -989,6 +1006,10 @@ function test() {
     assert.deepStrictEqual(iconOf({ app: 'gone', state: 1, offset: 0, icon: 'media' }, []), { builtin: 'lib/media', missing: true });
     assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'nope' }, []), { builtin: 'media' });
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'waze' }, []).own, 'waze');
+    // "Android Auto live": the colour one while connected, the white one while not
+    const aaSlot = { state: 2, applet: 23, icon: AA_LIVE };
+    assert.deepStrictEqual([iconOf(aaSlot, [], { aa: true }).builtin, iconOf(aaSlot, [], { aa: false }).builtin, iconOf({ state: 2, applet: 23, icon: AA_OFF }, [], { aa: true }).builtin],
+        ['lib/android-auto-color', 'lib/android-auto', 'lib/android-auto']);
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'nope' }, []).own, undefined);
     ICON_LIB.forEach(([n]) => assert(fs.existsSync(path.join(__dirname, 'icons', 'lib', n + '.png')), `icons/lib/${n}.png`));
     // buttons: only what the car has and the settings allow, in the HMI's spots
@@ -1127,6 +1148,7 @@ function test() {
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
     seats.test();
+    aa.test();
     shift.test();
     console.log('overlays self-check ok');
 }
