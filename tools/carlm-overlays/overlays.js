@@ -46,6 +46,7 @@ const CLIENT = process.env.MGU_RENDER_CLIENT || '/var/opt/mgu-render/current/mgu
 const CLUSTER = process.env.CLUSTER_RENDER_CLIENT || '/var/opt/cluster-render/current/cluster_render_client.js';
 const HMICTL = path.join(__dirname, 'hmictl');
 const SELF = 'carlm_overlays';               // the control-panel app: not offered as a slot
+const PEEK_MS = 20000;                        // "Show BMW's own": how long ours stay hidden
 const HOLD_MS = 1000, PENDING_MS = 3000, REREAD_MS = 60000;
 const OFFSETS = [0, 3000];                   // an app's RHMI application against its appletId (oap-sdk)
 // screen px. The M4's bar (screenshots 2026-11-02 / -03): temperatures 365-843 | 1987-2465, CLIMATE MENU 1386-1495.
@@ -141,17 +142,20 @@ const OFF_ALPHA = 0.6;
 const MODES = ['road', 'sport', 'track'];
 const SIDES = ['left', 'right'];                     // where the steering wheel is (LAYOUT is a left-hand drive car's)
 // alignment: a car whose bar is not where LAYOUT measured it (another HMI build, a right-hand drive car's mirrored bar):
-// px per button key and 'all' (added to each), x the button, y its icon; kept within these
-const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, y: 20 };
+// px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
+// y its icon up / down; kept within these
+const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20 }, AXES = ['x', 'ix', 'y'];
 const clampAlign = (v, axis) => Math.max(-ALIGN_MAX[axis], Math.min(ALIGN_MAX[axis], v));
 /* a button's total offset: its own plus 'all' */
 const alignOf = (set, key) => {
     const a = (set && set.align) || {}, all = a.all || {}, own = a[key] || {};
-    return { x: clampAlign((all.x | 0) + (own.x | 0), 'x'), y: clampAlign((all.y | 0) + (own.y | 0), 'y') };
+    const out = {};
+    AXES.forEach((k) => { out[k] = clampAlign((all[k] | 0) + (own[k] | 0), k); });
+    return out;
 };
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
-    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, y: 0 }; return o; }, {}),
+    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0 }; return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', boot: false, car: 'auto' }, shift: shift.DEFAULTS };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
@@ -282,7 +286,7 @@ function mergeSettings(cur, p) {
         ALIGN_KEYS.forEach((k) => {
             const v = p.align[k];
             if (!v || typeof v !== 'object') return;
-            ['x', 'y'].forEach((axis) => { if (Number.isInteger(v[axis])) out.align[k][axis] = clampAlign(v[axis], axis); });
+            AXES.forEach((axis) => { if (Number.isInteger(v[axis])) out.align[k][axis] = clampAlign(v[axis], axis); });
         });
     }
     if (p.mmode && typeof p.mmode === 'object') {
@@ -462,12 +466,12 @@ function tint(img, rgb) {                            // the HMI's icons are grey
 /* on, the accent line shows the level: `max` segments, `level` of them lit, the rest dim; over the bar's own colour,
  * so the HMI's full line under it doesn't show through (one segment: the whole line, the wheel's on / off) */
 const BAR_BG = [1, 4, 8], DIM_SEG = [80, 86, 94], SEG_GAP = 6;
-function drawButton(px, L, kind, img, level, pressed, max, dy) {
+function drawButton(px, L, kind, img, level, pressed, max, dy, dx) {
     const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED;
     // pressed: a soft box over the button, above its accent line, like the HMI's own
     if (pressed) blend(px, BW, 4, 8, pill(BW - 8, L.lineY - 14, 0, 14, 0.14), 1);
     if (img) {
-        const cx = BW / 2 + ICON_DX;
+        const cx = BW / 2 + ICON_DX + (dx | 0);
         blend(px, BW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
     }
     if (!on) return;
@@ -541,12 +545,15 @@ function main() {
         // the HMI's icon for the spot it is drawn in (a right-hand drive car: the driver's buttons in the right-hand spots)
         picture({ builtin: kind === 'wheel' ? 'hmi-wheel' : `hmi-${kind}-${spotSeat(seat, settings.side)}` }, (img) => {
             const px = Buffer.alloc(BW * H * 4);
-            drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, alignOf(settings, key).y);
+            drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, alignOf(settings, key).y, alignOf(settings, key).ix);
             gpu.pixels(PIX[key], [{ x: 0, y: 0, w: BW, h: H }], px);
             frame();
         }, HMI_PX);
     }
-    const shownButtons = () => buttons(L, st, settings);
+    // "Show BMW's own" (the app's Align page): ours hidden PEEK_MS, the HMI's own buttons show and take the touches
+    let peekUntil = 0, peekTimer = null;
+    const peeking = () => Date.now() < peekUntil;
+    const shownButtons = () => (peeking() ? [] : buttons(L, st, settings));
     const shownSlots = () => (settings.shortcuts ? L.slots : []);
     const draw = (k) => (typeof k === 'number' ? (k >= 0 ? drawSlot(k) : null) : drawButtonKey(k));
     function frame() {
@@ -810,7 +817,7 @@ function main() {
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
             mcar: mEff(), mfound: mcar, setups: m.sp21 ? 2 : 1 }, shift: sl.status(),
-        notice: notice && Date.now() - notice.at < REPAIR_MS ? notice : null } });
+        notice: notice && Date.now() - notice.at < REPAIR_MS ? notice : null, peek: peeking() } });
     function push() { const l = JSON.stringify(status()) + '\n'; clients.forEach((c) => c.write(l)); }
     function targets() {
         apps = installedApps(OAP);
@@ -837,6 +844,12 @@ function main() {
             slots[q.i] = sl;
             log(`slot ${q.i}: icon ${q.icon || 'default'}`);
             save(); drawSlot(q.i); push();
+        } else if (q.op === 'peek') {
+            peekUntil = q.on ? Date.now() + PEEK_MS : 0;
+            if (peekTimer) clearTimeout(peekTimer);
+            peekTimer = q.on ? setTimeout(() => { peekTimer = null; redrawAll(); push(); }, PEEK_MS + 50) : null;
+            log(`peek ${q.on ? 'on' : 'off'}`);
+            redrawAll(); push();
         } else if (q.op === 'icons') {
             c.write(JSON.stringify({ icons: ICON_LIB.map(([name, title]) => {
                 let pic = null;
@@ -970,12 +983,15 @@ function test() {
     assert.strictEqual(mergeSettings(rhd, { side: 'middle' }).side, 'right', 'a bad side: kept');
     // alignment: per button plus 'all', x moves the button (kept on the bar), clamped; partial updates keep the other axis
     const al = mergeSettings(SETTINGS, { align: { 'driver.heat': { x: 7, y: -3 }, all: { x: -2 }, 'passenger.cool': { x: 999, y: 'no' }, bogus: { x: 1 } } });
-    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, y: -3 }, { x: -2, y: 0 }, { x: 120, y: 0 }, undefined]);
-    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, y: -3 });
+    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3 }, { x: -2, ix: 0, y: 0 }, { x: 120, ix: 0, y: 0 }, undefined]);
+    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3 });
     assert.strictEqual(keys(heatOnly, al), 'driver.heat@893 passenger.heat@2484');
-    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, y: 4 });
+    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4 });
     assert.strictEqual(keys(all, mergeSettings(SETTINGS, { align: { 'driver.wheel': { x: -100 } } })).split(' ')[0], 'driver.wheel@0', 'kept on the bar');
-    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, y: 0 }, 'defaults: centred');
+    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0 }, 'defaults: centred');
+    const ia = mergeSettings(SETTINGS, { align: { all: { ix: 2 }, 'driver.heat': { ix: -7 }, 'driver.cool': { ix: 99 } } });
+    assert.deepStrictEqual([alignOf(ia, 'driver.heat').ix, alignOf(ia, 'driver.cool').ix, keys(heatOnly, ia)], [-5, 40, 'driver.heat@888 passenger.heat@2486'],
+        'ix: the icon alone, the button stays');
     // settings: known keys of the right kind only
     const s2 = mergeSettings(SETTINGS, { order: 'down', mmode: { m2: 'track', off: 'warp', on: false, boot: 1 }, extra: 1, shortcuts: 0,
         ambientHeat: 4, ambientCool: 13 });
