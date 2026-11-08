@@ -69,22 +69,25 @@ const SCREENS = [
     { title: 'Climate', state: 3, applet: 517, png: 'climate', icon: 'Fan' },
 ];
 // the icons a slot can wear instead of its own picture: icons/lib/<name>.png, 84 px, #f0f0f0 like icons/*.png. Material
-// Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto and Waze, Simple Icons (CC0): icons/lib/LICENSE
+// Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto and Waze, Simple Icons (CC0); first the iDrive 8.5
+// quick-select set (media, nav, home, apps, phone: the strip's own icons/*.png; fan: MDI at their size): icons/lib/LICENSE
 const ICON_LIB = [
     ['android-auto', 'Android Auto'],
+    ['media', 'Media'],
+    ['nav', 'Navigation'],
+    ['fan', 'Climate'],
+    ['home', 'Home'],
+    ['apps', 'All apps'],
+    ['phone', 'Phone'],
     ['android', 'Android'],
-    ['music', 'Music'],
     ['spotify', 'Spotify'],
     ['podcast', 'Podcasts'],
     ['radio', 'Radio'],
     ['play-circle', 'Play'],
     ['youtube', 'YouTube'],
-    ['navigation-variant', 'Navigation'],
     ['map-marker', 'Map pin'],
     ['google-maps', 'Google Maps'],
     ['waze', 'Waze'],
-    ['home', 'Home'],
-    ['phone', 'Phone'],
     ['message-text', 'Messages'],
     ['account', 'Profile'],
     ['car', 'Car'],
@@ -98,7 +101,6 @@ const ICON_LIB = [
     ['ev-station', 'Charging'],
     ['tire', 'Tyres'],
     ['thermometer', 'Temperature'],
-    ['fan', 'Fan'],
     ['car-seat-heater', 'Seat heating'],
     ['car-seat-cooler', 'Seat cooling'],
     ['steering', 'Steering wheel'],
@@ -109,7 +111,6 @@ const ICON_LIB = [
     ['flag-checkered', 'Track'],
     ['timer-outline', 'Timer'],
     ['cog', 'Settings'],
-    ['view-grid', 'Apps'],
 ];
 const iconName = (n) => (typeof n === 'string' && ICON_LIB.some((x) => x[0] === n) ? n : null);
 let learned = {};                                    // title -> { state, applet } this car's HMI uses instead
@@ -926,7 +927,7 @@ function test() {
     assert.deepStrictEqual(describe({ app: 'gone', state: 1, offset: 0 }, []), { kind: 'app', app: 'gone', title: 'gone', missing: true });
     // a slot's own icon: wins over its picture (dimmed when its app is gone), unknown names ignored, kept in describe()
     assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'android-auto' }, []), { builtin: 'lib/android-auto' });
-    assert.deepStrictEqual(iconOf({ app: 'gone', state: 1, offset: 0, icon: 'music' }, []), { builtin: 'lib/music', missing: true });
+    assert.deepStrictEqual(iconOf({ app: 'gone', state: 1, offset: 0, icon: 'media' }, []), { builtin: 'lib/media', missing: true });
     assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'nope' }, []), { builtin: 'media' });
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'waze' }, []).own, 'waze');
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'nope' }, []).own, undefined);

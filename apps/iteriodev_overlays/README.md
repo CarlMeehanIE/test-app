@@ -27,7 +27,7 @@ BMW screens or the apps on this car.
 
 ![Shortcut icons](screenshots/icons.png)
 
-*Icon in the bar* on the Shortcuts page: the picture a shortcut shows in the climate bar, instead of the screen's own (39 icons: Android Auto, Spotify, Waze, Google Maps, YouTube, car and comfort icons). It stays with the shortcut when you change what it opens; *Default* goes back to the screen's own picture. For an Android Auto shortcut: open Android Auto, hold the shortcut 1 s, then pick its icon. Icons: Material Design Icons (Apache-2.0) and Simple Icons (CC0). Needs the Overlays tool 0.6.0.
+*Icon in the bar* on the Shortcuts page: the picture a shortcut shows in the climate bar, instead of the screen's own (39 icons: the car's own quick-select set - Media, Navigation, Climate, Home, All apps, Phone - plus Android Auto, Spotify, Waze, Google Maps, YouTube, car and comfort icons). It stays with the shortcut when you change what it opens; *Default* goes back to the screen's own picture. For an Android Auto shortcut: open Android Auto, hold the shortcut 1 s, then pick its icon. Icons: Material Design Icons (Apache-2.0) and Simple Icons (CC0). Needs the Overlays tool 0.6.0.
 
 ### Climate
 
