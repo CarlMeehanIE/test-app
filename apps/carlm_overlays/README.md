@@ -2,7 +2,7 @@
 
 Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
 
-Version 1.10.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
+Version 1.11.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
 
 > [!NOTE]
 > The strip in the climate bar is car-tested (G82); the app's pages are not yet. Needs the Overlays tool (the Store installs it with the app).
@@ -27,7 +27,7 @@ BMW screens or the apps on this car.
 
 ![Shortcut icons](screenshots/icons.png)
 
-*Icon in the bar* on the Shortcuts page: the picture a shortcut shows in the climate bar, instead of the screen's own (39 icons: the car's own quick-select set - Media, Navigation, Climate, Home, All apps, Phone - plus Android Auto (white, or *Android Auto live*: in its colours while a phone's Android Auto is connected, white while not; the Shortcuts page shows what the car reads), Spotify, Waze, Google Maps, YouTube, car and comfort icons). It stays with the shortcut when you change what it opens; *Default* goes back to the screen's own picture. For an Android Auto shortcut: open Android Auto, hold the shortcut 1 s, then pick its icon. Icons: Material Design Icons (Apache-2.0) and Simple Icons (CC0). Needs the Overlays tool 0.6.0.
+*Icon in the bar* on the Shortcuts page: the picture a shortcut shows in the climate bar, instead of the screen's own (39 icons: the car's own quick-select set - Media, Navigation, Climate, Home, All apps, Phone - plus Android Auto (white, or *Android Auto live*: in its colours while a phone's Android Auto is connected, white while not; the Shortcuts page shows what the car reads), Spotify, Waze, Google Maps, YouTube, car and comfort icons). It stays with the shortcut when you change what it opens; *Default* goes back to the screen's own picture. For an Android Auto shortcut: pick *Android Auto* in the slot's picker (it takes the Android Auto live icon), then once open Android Auto and hold that shortcut 1 s, as the page asks: that teaches the car's screen, and taps open it after that. Icons: Material Design Icons (Apache-2.0) and Simple Icons (CC0). Needs the Overlays tool 0.6.0.
 
 ### Climate
 

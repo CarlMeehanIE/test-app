@@ -75,6 +75,8 @@ const SCREENS = [
     { title: 'All apps', state: 20, applet: 4, png: 'apps', icon: 'Menu' },
     { title: 'Home', state: 20000, applet: 4, png: 'home', icon: 'MainMenu' },
     { title: 'Climate', state: 3, applet: 517, png: 'climate', icon: 'Fan' },
+    // Android Auto's own ids are not known yet (-1): picked, the slot is taught by a hold on Android Auto (learned{})
+    { title: 'Android Auto', state: -1, applet: -1, png: 'lib/android-auto', icon: 'AndroidAuto', learn: true },
 ];
 // the icons a slot can wear instead of its own picture: icons/lib/<name>.png, 84 px, #f0f0f0 like icons/*.png. Material
 // Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto (white, and in its colours) and Waze, Simple Icons (CC0); first the iDrive 8.5
@@ -773,6 +775,13 @@ function main() {
         apps = installedApps(OAP);
         const s = slots[i], t = target(s, apps);
         if (!t) { log(`slot ${i}: ${s.app} is not installed`); return; }
+        if (!s.app && t.state < 0) {                  // a screen not taught yet (Android Auto): ask for the hold
+            failAt[i] = Date.now();
+            notice = { slot: i, title: describe(s, apps).title, at: failAt[i], learn: true };
+            drawSlot(i); setTimeout(() => drawSlot(i), 1550);
+            push();
+            return;
+        }
         const before = s.app ? null : await hmi('ctx');   // a BMW screen: did the tap change anything?
         let r = await hmi(`open ${t.state} ${t.applet}`);
         if (!s.app) {
@@ -821,7 +830,8 @@ function main() {
         const c = classify(+mm[1], +mm[2], apps), was = describe(slots[i], apps);
         // a hold soon after this slot's BMW screen did not open, on a screen we don't know: that screen's own ids here
         if (Date.now() - failAt[i] < REPAIR_MS && !slots[i].app && !c.app && was.title !== 'BMW screen' &&
-            !screenList().some((x) => x.state === c.state && x.applet === c.applet)) {
+            !screenList().some((x) => x.state === c.state && x.applet === c.applet) &&
+            (was.title !== 'Android Auto' || aaNow.connected)) {      // Android Auto's screen only with a phone on it
             learned[was.title] = { state: c.state, applet: c.applet };
             log(`slot ${i}: ${was.title} is ${c.state} ${c.applet} on this car`);
             failAt[i] = 0;
@@ -867,8 +877,17 @@ function main() {
             save(); redrawAll(); push();
             if (settings.shift.on !== was) sl.settings(); else sl.tick();
         } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && slotOk(q.target)) {
-            const t = q.target;
-            setSlot(q.i, t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet });
+            const t = q.target, sl = t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet };
+            const scr = !t.app && screenList().find((x) => x.state === t.state && x.applet === t.applet);
+            if (scr && scr.title === 'Android Auto' && !iconName(slots[q.i].icon)) sl.icon = AA_LIVE;   // its live icon
+            setSlot(q.i, sl);
+            // a screen whose ids this car has not shown yet: ask for the hold that teaches them (the repair path)
+            if (scr && scr.state < 0) {
+                failAt[q.i] = Date.now();
+                notice = { slot: q.i, title: scr.title, at: failAt[q.i], learn: true };
+                log(`slot ${q.i}: ${scr.title} picked, its ids not known: waiting for a hold on it`);
+                push();
+            }
         } else if (q.op === 'icon' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && (q.icon === null || iconName(q.icon))) {
             const sl = Object.assign({}, slots[q.i]);
             if (q.icon) sl.icon = q.icon; else delete sl.icon;
@@ -1006,6 +1025,11 @@ function test() {
     assert.deepStrictEqual(iconOf({ app: 'gone', state: 1, offset: 0, icon: 'media' }, []), { builtin: 'lib/media', missing: true });
     assert.deepStrictEqual(iconOf({ state: 2, applet: 23, icon: 'nope' }, []), { builtin: 'media' });
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'waze' }, []).own, 'waze');
+    // Android Auto in the picker: its ids not known (-1) until a hold teaches them; its picture the white AA icon
+    const aaScreen = SCREENS.find((x) => x.title === 'Android Auto');
+    assert.deepStrictEqual([aaScreen.state, aaScreen.applet, describe({ state: -1, applet: -1 }, []).title, iconOf({ state: -1, applet: -1 }, []).builtin],
+        [-1, -1, 'Android Auto', 'lib/android-auto']);
+    assert(slotOk({ state: -1, applet: -1 }), 'a slot waiting to be taught is a good slot');
     // "Android Auto live": the colour one while connected, the white one while not
     const aaSlot = { state: 2, applet: 23, icon: AA_LIVE };
     assert.deepStrictEqual([iconOf(aaSlot, [], { aa: true }).builtin, iconOf(aaSlot, [], { aa: false }).builtin, iconOf({ state: 2, applet: 23, icon: AA_OFF }, [], { aa: true }).builtin],
