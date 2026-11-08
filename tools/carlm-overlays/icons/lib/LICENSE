@@ -2,7 +2,9 @@ Shortcut icons (icons/lib/*.png), rendered to 84 px PNGs in #f0f0f0:
 
 - media, nav, home, apps, phone: copies of this tool's own strip icons (icons/*.png), the iDrive 8.5 quick-select look.
 - Material Design Icons by Pictogrammers (@mdi/svg 7.4.47), Apache License 2.0,
-  https://pictogrammers.com/library/mdi/ - every other icon except android-auto and waze (fan at 60 px).
+  https://pictogrammers.com/library/mdi/ - every other icon except android-auto and waze; outline
+  variants where MDI has them, drawn at 48 px (its 2x grid) or 44 px for the heavier ones, in a 76 px canvas: the
+  strip draws them at that size, unscaled, about the weight of the car's own icons.
 - Simple Icons (simple-icons 16.37.0), CC0 1.0, https://simpleicons.org/ - android-auto, waze.
 
 Brand icons (Android Auto, Android, Spotify, YouTube, Google Maps, Waze) are trademarks of their owners;

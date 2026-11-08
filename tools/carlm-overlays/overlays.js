@@ -410,6 +410,19 @@ class Gestures {
 }
 
 /* ---- drawing: premultiplied RGBA ---- */
+// an app's picture in a slot: its drawn part at most this big, as the car's own icons (their glyphs 40-50 px at 76)
+const APP_GLYPH = 44;
+/* img (straight RGBA) cut to what is drawn (alpha > 8): an app's tile picture without its empty border */
+function trim(img) {
+    let x0 = img.w, y0 = img.h, x1 = -1, y1 = -1;
+    for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) {
+        if (img.data[(y * img.w + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    if (x1 < 0) return img;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, data = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) data.set(img.data.subarray(((y0 + y) * img.w + x0) * 4, ((y0 + y) * img.w + x1 + 1) * 4), y * w * 4);
+    return { w, h, data };
+}
 function blend(dst, w, x0, y0, img, alpha) {         // img straight RGBA, alpha 0..1
     for (let y = 0; y < img.h; y++) {
         for (let x = 0; x < img.w; x++) {
@@ -488,7 +501,9 @@ function main() {
         try { buf = fs.readFileSync(file); } catch (e) { return cb(null); }
         png.decodeAsync(buf, (e, img) => {
             if (e) log(`icon ${file}: ${e.message}`);
-            pics[key] = e ? null : png.fit(img, max || ICON_MAX);
+            // an app's own picture (a full-bleed tile, 140-256 px): trimmed and shrunk to the strip's icon size; ours are drawn
+            // at their final size already (icons/*.png, icons/lib/*.png)
+            pics[key] = e ? null : ic.file ? png.fit(trim(img), APP_GLYPH) : png.fit(img, max || ICON_MAX);
             cb(pics[key]);
         });
     }
@@ -1049,6 +1064,13 @@ function test() {
     assert.deepStrictEqual(at4(heatOff, 60, LAYOUT.iconY).slice(3), [Math.round(255 * OFF_ALPHA)], 'off: white, dimmed');
     assert.deepStrictEqual(at4(coolOn, 60, LAYOUT.iconY), BLUE.concat(255), 'vent icon centred too');
     assert.deepStrictEqual(at4(coolOn, 84, LAYOUT.iconY), [0, 0, 0, 0], '... not off to the right');
+    // an app's picture: its empty border trimmed, then no bigger than APP_GLYPH
+    const tile = { w: 140, h: 140, data: new Uint8Array(140 * 140 * 4) };
+    for (let y = 10; y < 130; y++) for (let x = 20; x < 120; x++) tile.data[(y * 140 + x) * 4 + 3] = 255;
+    const tt = trim(tile), tf = png.fit(tt, APP_GLYPH);
+    assert.deepStrictEqual([tt.w, tt.h, tf.w, tf.h], [100, 120, 37, APP_GLYPH]);
+    // the shortcut icons are drawn at their final size: 76 px (no scaling, no blur), the glyph about the car's own
+    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.w <= 84 && im.h <= 84, n); });
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
     seats.test();
