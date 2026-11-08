@@ -39,6 +39,7 @@ const png = require('./png');
 const seats = require('./seats');
 const shift = require('./shiftlights');
 const aa = require('./aa');
+const finder = require('./finder');
 
 const DATA = process.env.OVERLAYS_DATA || '/var/opt/carlm-overlays/slots.json';
 const CTL = process.env.OVERLAYS_CTL || '/run/carlm-overlays/ctl.sock';
@@ -854,6 +855,7 @@ function main() {
 
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
+    let scanning = false;
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
@@ -900,6 +902,17 @@ function main() {
             peekTimer = q.on ? setTimeout(() => { peekTimer = null; redrawAll(); push(); }, PEEK_MS + 50) : null;
             log(`peek ${q.on ? 'on' : 'off'}`);
             redrawAll(); push();
+        } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
+            if (scanning) return;
+            scanning = true;
+            const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
+            send({ scanning: true });
+            log('finder: scanning');
+            finder.scan((e, r) => {
+                scanning = false;
+                log(`finder: ${e ? e.message : `${r.total} lines`}`);
+                send(e ? { error: e.message } : r);
+            }, { file: path.join(path.dirname(DATA), 'finder.txt') });
         } else if (q.op === 'icons') {
             c.write(JSON.stringify({ icons: ICON_LIB.map(([name, title]) => {
                 let pic = null;
@@ -1173,6 +1186,7 @@ function test() {
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
     seats.test();
     aa.test();
+    assert.deepStrictEqual(finder.lines('/etc/a.json:3:  "privacy": 1\n/var/opt/carlm-overlays/b:1: privacy\n'), ['/etc/a.json:3: "privacy": 1']);
     shift.test();
     console.log('overlays self-check ok');
 }
