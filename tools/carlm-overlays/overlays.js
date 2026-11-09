@@ -521,6 +521,8 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlh
         const cx = bx + BW / 2 + ICON_DX + (dx | 0);
         blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : DIM_SEG), 1);
     }
+    // the steering wheel is on / off only - no accent line in any state, just the icon (red on, grey off), like the HMI
+    if (kind === 'wheel') return;
     // The accent line is always drawn, in every state: a left connector (up to a gap before the first segment), the
     // segment track, and an optional right extension. Off -> all grey; on -> red / blue on the connector and the lit
     // segments, grey on the rest. One black mask runs under the whole span so the car's own accent line (which we can't
@@ -1221,7 +1223,7 @@ function test() {
     assert.deepStrictEqual([at4(heatOn, 50, LAYOUT.lineY), at4(heatOn, 100, LAYOUT.lineY), at4(heatOn, 38, LAYOUT.lineY)],
         [RED.concat(255), DIM_SEG.concat(255), BAR_BG.concat(255)], 'heat 2 of 3: two red segments, one dim');
     assert.deepStrictEqual([at4(coolOn, 0, LAYOUT.lineY + 5), at4(coolOn, 60, LAYOUT.lineY)], [BLUE.concat(255), DIM_SEG.concat(255)], 'vent 1 of 3');
-    assert.deepStrictEqual(at4(wheelOn, 60, LAYOUT.lineY), RED.concat(255), 'the wheel: one segment, the whole line');
+    assert.deepStrictEqual([at4(wheelOn, 60, LAYOUT.lineY), at4(wheelOn, 60, LAYOUT.iconY)], [[0, 0, 0, 0], RED.concat(255)], 'the wheel: icon only, no line in any state');
     // off: the line stays, drawn grey (connector + segment track), and the icon goes grey - nothing disappears
     assert.deepStrictEqual(at4(heatOff, -40, lineBottom), DIM_SEG.concat(255), 'off: grey connector still drawn');
     assert.deepStrictEqual([at4(heatOff, 50, LAYOUT.lineY), at4(heatOff, 38, LAYOUT.lineY)], [DIM_SEG.concat(255), BAR_BG.concat(255)], 'off: grey segments, black gaps');
