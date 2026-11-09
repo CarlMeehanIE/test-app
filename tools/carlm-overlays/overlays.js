@@ -531,7 +531,10 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlh
         connL = Math.max(0, gbx - SEG_GAP - Math.min(CONN + leftExt, DW)),
         rext = lx > 0 ? Math.min(EXT_MAX, lx, DW - (gbx + BW + SEG_GAP)) : 0,
         maskR = Math.min(DW, gbx + BW + (rext > 0 ? SEG_GAP + rext : 0));
-    if (maskR > connL) blend(px, DW, connL, ly - MASK_PAD, pill(maskR - connL, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);  // opaque black, hides the car's line
+    // the black mask has slanted "/" ends (same angle as the segments), so it keeps the car's own angled trail-off rather
+    // than squaring it off
+    const maskH = L.lineH + 2 * MASK_PAD, maskSl = Math.round(SLANT * (maskH - 1) / (L.lineH - 1));
+    if (maskR > connL) blend(px, DW, connL, ly - MASK_PAD, slantBar(maskR - connL, maskH, maskSl, BAR_BG), 1);  // opaque black, angled ends, hides the car's line
     if (rext > 0) blend(px, DW, gbx + BW + SEG_GAP, ly, slantBar(rext, L.lineH, SLANT, lineCol), 1);  // coloured extension past the last segment
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
     for (let i = 0; i < n; i++) {
