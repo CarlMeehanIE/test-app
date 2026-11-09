@@ -481,7 +481,7 @@ function tint(img, rgb) {                            // the HMI's icons are grey
 /* one seat / wheel button (buttonW x h): the icon off its centre, the accent line when on */
 /* on, the accent line shows the level: `max` segments, `level` of them lit, the rest dim; over the bar's own colour,
  * so the HMI's full line under it doesn't show through (one segment: the whole line, the wheel's on / off) */
-const BAR_BG = [1, 4, 8], DIM_SEG = [80, 86, 94], SEG_GAP = 6;
+const BAR_BG = [1, 4, 8], DIM_SEG = [150, 160, 172], SEG_GAP = 6;   // DIM_SEG: the grey for off / unlit, to match the car's own line
 // the HMI's bars end in a slant, "/" (the top edge longer): each segment a parallelogram leaning right by SLANT px over
 // the line's height (photo 2026-11-08: the cut ~0.4 of the bar's height)
 const SLANT = 3;
@@ -505,6 +505,10 @@ const MASK_PAD = 4;
 // EXT_MAX: the button is drawn on a wider surface with this much spare each side, so the accent line can be lengthened
 // (lx) past the button into the car's own continuous line. DRAW_W is that surface; the button sits in its middle.
 const EXT_MAX = 240;
+// CONN: the accent line always runs this far left of the first segment (with a SEG_GAP gap), as a connector up to the
+// car's own line; the Line tool's lx lengthens it further. Drawn in every state (grey when off), so the line never
+// disappears.
+const CONN = 40;
 const drawW = (L) => L.buttonW + 2 * EXT_MAX;
 /* draws into a drawW(L)-wide surface; the button occupies [EXT_MAX, EXT_MAX + buttonW). dlx: the line's extension,
  * negative left / positive right, past the button, to sit into the car's own line. */
@@ -514,16 +518,21 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx) {
     if (pressed) blend(px, DW, bx + 4, 8, pill(BW - 8, ly - 14, 0, 14, 0.14), 1);
     if (img) {
         const cx = bx + BW / 2 + ICON_DX + (dx | 0);
-        blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
+        blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : DIM_SEG), 1);
     }
-    if (!on) return;
-    const bar = (x0, w) => { if (w <= 0) return; blend(px, DW, x0, ly - MASK_PAD, pill(w, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
-        blend(px, DW, x0, ly, slantBar(w, L.lineH, SLANT, rgb), 1); };
-    const lx = dlx | 0;
-    if (lx < 0) bar(bx - Math.min(EXT_MAX, -lx), Math.min(EXT_MAX, -lx));          // extend left, into the car's line
-    if (lx > 0) bar(bx + BW, Math.min(EXT_MAX, lx));                               // extend right
+    // The accent line is always drawn, in every state: a left connector (up to a gap before the first segment), the
+    // segment track, and an optional right extension. Off -> all grey; on -> red / blue on the connector and the lit
+    // segments, grey on the rest. One black mask runs under the whole span so the car's own accent line (which we can't
+    // remove) can't show through the gaps - it is covered, and only our own pieces sit on top.
+    const lineCol = on ? rgb : DIM_SEG, lx = dlx | 0,
+        leftExt = lx < 0 ? Math.min(EXT_MAX, -lx) : 0,
+        connW = Math.min(CONN + leftExt, bx - SEG_GAP), connL = bx - SEG_GAP - connW,
+        rext = lx > 0 ? Math.min(EXT_MAX, lx, DW - (bx + BW + SEG_GAP)) : 0,
+        maskR = bx + BW + (rext ? SEG_GAP + rext : 0);
+    blend(px, DW, connL, ly - MASK_PAD, pill(maskR - connL, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
+    if (connW > 0) blend(px, DW, connL, ly, slantBar(connW, L.lineH, SLANT, lineCol), 1);   // connector into the car's line
+    if (rext > 0) blend(px, DW, bx + BW + SEG_GAP, ly, slantBar(rext, L.lineH, SLANT, lineCol), 1);  // past the last segment
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
-    blend(px, DW, bx, ly - MASK_PAD, pill(BW, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
     for (let i = 0; i < n; i++) {
         const x0 = bx + Math.round(i * (sw + SEG_GAP)), x1 = bx + Math.round(i * (sw + SEG_GAP) + sw);
         blend(px, DW, x0, ly, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
@@ -1188,7 +1197,8 @@ function test() {
     g.touch('down', 400); g.touch('up', 400);
     g.touch('down', 2800); assert.strictEqual(timers.length, 0); g.touch('up', 2801);
     assert.deepStrictEqual(ev, ['tap0', 'hold2', 'tappassenger.heat']);
-    // a button: off = white icon, no line; on = coloured icon + the accent line under the whole button
+    // a button: off = grey icon + grey line; on = coloured icon + red / blue on the connector and lit segments; the line
+    // (connector + segment track) is always drawn, in every state
     const icon = { w: 10, h: 10, data: Buffer.alloc(400, 255) };
     const DWt = LAYOUT.buttonW + 2 * EXT_MAX;
     const btn = (kind, level, max, lx) => { const px = Buffer.alloc(DWt * LAYOUT.h * 4); drawButton(px, LAYOUT, kind, icon, level, false, max, 0, 0, 0, lx || 0); return px; };
@@ -1199,18 +1209,20 @@ function test() {
     // the slant "/": top row starts SLANT px in and runs to the segment's end, the bottom row the other way round
     assert.deepStrictEqual([at4(heatOn, 0, LAYOUT.lineY), at4(heatOn, 35, LAYOUT.lineY), at4(heatOn, 35, lineBottom)],
         [BAR_BG.concat(255), RED.concat(255), BAR_BG.concat(255)], 'segments lean right like the HMI\'s bars');
-    // lx: the line runs past the button's left edge once extended (bar-bg there without it)
-    assert.deepStrictEqual(at4(btn('heat', 2, 3, 0), -40, lineBottom), [0, 0, 0, 0], 'no extension: nothing left of the button');
-    assert.deepStrictEqual(at4(btn('heat', 2, 3, -80), -40, lineBottom), RED.concat(255), 'extended left: red past the button');
+    // the connector: the line always runs CONN px left of the first segment, even with no extension; lx lengthens it
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, 0), -40, lineBottom), RED.concat(255), 'base connector: red left of the button even without extension');
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, -80), -40, lineBottom), RED.concat(255), 'extended left: red further into the car\'s line');
     assert.deepStrictEqual(at4(btn('cool', 1, 3, 60), LAYOUT.buttonW + 30, lineBottom), BLUE.concat(255), 'extended right: blue past the button');
     // the level: 3 segments of 36 px, 6 px apart (0-35, 42-77, 84-119); the gaps the bar's colour (the HMI's line hidden)
     assert.deepStrictEqual([at4(heatOn, 50, LAYOUT.lineY), at4(heatOn, 100, LAYOUT.lineY), at4(heatOn, 38, LAYOUT.lineY)],
         [RED.concat(255), DIM_SEG.concat(255), BAR_BG.concat(255)], 'heat 2 of 3: two red segments, one dim');
     assert.deepStrictEqual([at4(coolOn, 0, LAYOUT.lineY + 5), at4(coolOn, 60, LAYOUT.lineY)], [BLUE.concat(255), DIM_SEG.concat(255)], 'vent 1 of 3');
     assert.deepStrictEqual(at4(wheelOn, 60, LAYOUT.lineY), RED.concat(255), 'the wheel: one segment, the whole line');
-    assert.deepStrictEqual(at4(heatOff, 0, LAYOUT.lineY), [0, 0, 0, 0], 'off: no line');
+    // off: the line stays, drawn grey (connector + segment track), and the icon goes grey - nothing disappears
+    assert.deepStrictEqual(at4(heatOff, -40, lineBottom), DIM_SEG.concat(255), 'off: grey connector still drawn');
+    assert.deepStrictEqual([at4(heatOff, 50, LAYOUT.lineY), at4(heatOff, 38, LAYOUT.lineY)], [DIM_SEG.concat(255), BAR_BG.concat(255)], 'off: grey segments, black gaps');
     assert.deepStrictEqual(at4(heatOn, 60, LAYOUT.iconY), RED.concat(255), 'heat icon centred over its line (60)');
-    assert.deepStrictEqual(at4(heatOff, 60, LAYOUT.iconY).slice(3), [Math.round(255 * OFF_ALPHA)], 'off: white, dimmed');
+    assert.deepStrictEqual(at4(heatOff, 60, LAYOUT.iconY), DIM_SEG.concat(255), 'off: grey icon');
     assert.deepStrictEqual(at4(coolOn, 60, LAYOUT.iconY), BLUE.concat(255), 'vent icon centred too');
     assert.deepStrictEqual(at4(coolOn, 84, LAYOUT.iconY), [0, 0, 0, 0], '... not off to the right');
     // an app's picture: its empty border trimmed, then no bigger than APP_GLYPH
