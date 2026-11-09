@@ -121,10 +121,8 @@ function decodeAsync(buf, cb) {
 }
 
 // ponytail: whole-pixel boxes (no fractional weights) - plenty for icons going down 2-8x
-function fit(img, max) {
-    const { w, h, data } = img, k = max / Math.max(w, h);
-    if (k >= 1) return img;
-    const nw = Math.max(1, Math.round(w * k)), nh = Math.max(1, Math.round(h * k)), out = new Uint8Array(nw * nh * 4);
+function scale(img, nw, nh) {
+    const { w, h, data } = img, out = new Uint8Array(nw * nh * 4);
     for (let y = 0; y < nh; y++) {
         const y0 = Math.floor((y * h) / nh), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / nh));
         for (let x = 0; x < nw; x++) {
@@ -143,5 +141,15 @@ function fit(img, max) {
     }
     return { w: nw, h: nh, data: out };
 }
+// fit inside a max x max box (both dimensions), keeping aspect; only shrinks
+function fit(img, max) {
+    const k = max / Math.max(img.w, img.h);
+    return k >= 1 ? img : scale(img, Math.max(1, Math.round(img.w * k)), Math.max(1, Math.round(img.h * k)));
+}
+// fit to a given HEIGHT, keeping aspect, width free to be wider (for wide logos); only shrinks
+function fitH(img, maxH) {
+    const k = maxH / img.h;
+    return k >= 1 ? img : scale(img, Math.max(1, Math.round(img.w * k)), Math.max(1, Math.round(maxH)));
+}
 
-module.exports = { decode, decodeAsync, fit, MAX, BOUNDED };
+module.exports = { decode, decodeAsync, fit, fitH, scale, MAX, BOUNDED };

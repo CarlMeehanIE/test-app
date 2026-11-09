@@ -61,8 +61,14 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // button, a tap at its right end reached the HMI). The RIGHT ones stay as measured (2nd video: moved 24 px too, the
     // HMI's line showed left of ours instead)
     buttons: { 'driver.wheel': 20, 'driver.cool': 246, 'driver.heat': 888, 'passenger.cool': 1844, 'passenger.heat': 2486 },
+    // the far-left empty zone (before the temperature control): extra shortcuts, drawn at the same icon height but any
+    // width (a wide logo stays wide), laid out left to right from x with gap between, however many are shown
+    left: { x: 40, ih: 76, gap: 28, maxw: 300 },
     iconY: 55, lineY: 99, lineH: 6 };
-const SLOTS = LAYOUT.slots.length;   // 5: four around CLIMATE MENU, a fifth at the free cooled-seat spot
+const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
+const LEFT = 2;                      // extra shortcuts in the far-left zone (indices GRID..GRID+LEFT-1), shown only when given an icon
+const SLOTS = GRID + LEFT;           // 7 configurable shortcuts in all
+const LEFTPIX = [11, 12];            // the left slots' pixmaps (grid uses 1..GRID, buttons 6..10)
 // IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
 // against the accent line, so the icon sits centred over it
 const ICON_DX = 0;
@@ -84,6 +90,7 @@ const SCREENS = [
 // Design Icons (Pictogrammers, Apache-2.0) and, for Android Auto (white, and in its colours) and Waze, Simple Icons (CC0); first the iDrive 8.5
 // quick-select set (media, nav, home, apps, phone: the strip's own icons/*.png; fan: MDI at their size): icons/lib/LICENSE
 const ICON_LIB = [
+    ['m-color', 'M'],
     ['android-auto', 'Android Auto'],
     ['android-auto-color', 'Android Auto live'],
     ['media', 'Media'],
@@ -130,7 +137,11 @@ const iconName = (n) => (typeof n === 'string' && ICON_LIB.some((x) => x[0] === 
 let learned = {};                                    // title -> { state, applet } this car's HMI uses instead
 const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}, s, learned[s.title]) : s));
 const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps', 'Home'];
-const defaults = () => DEFAULT_TITLES.map((t) => { const s = screenList().find((x) => x.title === t); return { state: s.state, applet: s.applet }; });
+const defaults = () => {
+    const by = (t) => { const s = screenList().find((x) => x.title === t); return { state: s.state, applet: s.applet }; };
+    // 5 grid slots, then the 2 left-zone slots: the first wears the M (so it shows), the second is hidden until given an icon
+    return DEFAULT_TITLES.map(by).concat([Object.assign(by('Home'), { icon: 'm-color' }), by('Home')]);
+};
 const FAIL_MS = 800, REPAIR_MS = 10 * 60000;          // a tap's screen read again after; a hold that repairs it, within
 /* a tap that did nothing: the screen read before and after the open is the same, and is not the one asked for */
 function stuck(before, after, t) {
@@ -322,8 +333,8 @@ const slotOk = (s) => s && Number.isInteger(s.state) &&
 function loadData(file) {
     let j = {};
     try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log('slots.json: ' + e.message + ', the defaults instead'); }
-    const good = Array.isArray(j.slots) && (j.slots.length === 4 || j.slots.length === SLOTS) && j.slots.every(slotOk);
-    if (j.slots && !good) log(`slots.json: not 4 or ${SLOTS} good slots, the defaults instead`);
+    const good = Array.isArray(j.slots) && j.slots.length >= 4 && j.slots.length <= SLOTS && j.slots.every(slotOk);
+    if (j.slots && !good) log(`slots.json: not 4..${SLOTS} good slots, the defaults instead`);
     const lr = {};
     if (j.learned && typeof j.learned === 'object') {
         SCREENS.forEach((s) => { const v = j.learned[s.title]; if (v && Number.isInteger(v.state) && Number.isInteger(v.applet)) lr[s.title] = { state: v.state, applet: v.applet }; });
@@ -556,7 +567,7 @@ function main() {
     let slots = conf.slots, settings = conf.settings, mcar = conf.mcar, apps = installedApps(OAP);   // mcar: an M setup was seen
     const mEff = () => mcarOf(mcar, settings);       // an M car: the user's choice wins
     const SW = L.slotW, H = L.h, BW = L.buttonW, ICON_MAX = 76, HMI_PX = 84;
-    const pics = {}, flash = [0, 0, 0, 0], looks = [], failAt = [0, 0, 0, 0];
+    const pics = {}, flash = Array(SLOTS).fill(0), looks = [], failAt = Array(SLOTS).fill(0), leftW = {};   // leftW[i]: a left slot's drawn icon width (0 = hidden)
     let notice = null;                                // the last tap that did nothing: { slot, title, at }
     const boot = { since: 0, hmiAt: 0, up: false, wake: false };    // BOOT: shown once up; wake = a sleep, not a cold boot
     const st = seats.state(!!process.env.OVERLAYS_SEAT_DEMO);
@@ -588,6 +599,7 @@ function main() {
         try { saveData(DATA, Object.assign(conf.layout ? { layout: conf.layout } : {}, { slots, settings, mcar, learned, vents: st.legacy.seen })); } catch (e) { log('save: ' + e.message); }
     };
     function drawSlot(i) {
+        if (i >= GRID) return drawLeftSlot(i);
         const ic = iconOf(slots[i], apps, live());
         looks[i] = JSON.stringify(ic);
         picture(ic, (img) => {
@@ -599,6 +611,38 @@ function main() {
             gpu.pixels(i + 1, [{ x: 0, y: 0, w: SW, h: H }], px);
             frame();
         });
+    }
+    // a left-zone icon: fitted to the icon height, any width (a wide logo stays wide); cached by file + mtime, apart from picture()'s box fit
+    function leftPic(file, cb) {
+        let key = file + ':h';
+        try { key += fs.statSync(file).mtime.getTime(); } catch (e) { return cb(null); }
+        if (pics[key] !== undefined) return cb(pics[key]);
+        let buf; try { buf = fs.readFileSync(file); } catch (e) { return cb(null); }
+        png.decodeAsync(buf, (e, img) => { if (e) log(`icon ${file}: ${e.message}`); pics[key] = e ? null : png.fitH(img, L.left.ih); cb(pics[key]); });
+    }
+    function drawLeftSlot(i) {
+        const slot = slots[i], name = slot && iconName(slot.icon), pid = LEFTPIX[i - GRID], MW = L.left.maxw;
+        if (!name) { leftW[i] = 0; return frame(); }                     // a left slot is shown only once it is given an icon
+        looks[i] = JSON.stringify({ builtin: 'lib/' + name });
+        leftPic(path.join(__dirname, 'icons', 'lib', name + '.png'), (img) => {
+            const px = Buffer.alloc(MW * H * 4);
+            if (img) {
+                const w = Math.min(img.w, MW), y = (H - img.h) >> 1;
+                const bg = flash[i] > Date.now() ? 0.4 : gestures.pressed() === i ? 0.18 : 0;
+                if (bg) blend(px, MW, 0, (H - L.left.ih - 16) >> 1, pill(w + 16, L.left.ih + 16, 10, 20, bg), 1);
+                blend(px, MW, (w - img.w) >> 1, y, img, 1);
+                leftW[i] = w;
+            } else leftW[i] = 0;
+            gpu.pixels(pid, [{ x: 0, y: 0, w: MW, h: H }], px);
+            frame();
+        });
+    }
+    // the shown left slots, laid out left to right from the zone's x with a gap between (however many have an icon)
+    function leftLayout() {
+        if (!settings.shortcuts || peeking()) return [];
+        const out = []; let x = L.left.x;
+        for (let i = GRID; i < SLOTS; i++) { if (!leftW[i]) continue; out.push({ i, x, w: leftW[i] }); x += leftW[i] + L.left.gap; }
+        return out;
     }
     const state = (key) => {                          // 'driver.heat' -> its { have, level, max }; 'driver.wheel' too
         const [seat, kind] = key.split('.');
@@ -626,6 +670,7 @@ function main() {
     const draw = (k) => (typeof k === 'number' ? (k >= 0 ? drawSlot(k) : null) : drawButtonKey(k));
     function frame() {
         const ops = shownSlots().map((x, i) => imageOp(i + 1, x, 0, SW, H, 0));
+        for (const l of leftLayout()) ops.push(imageOp(LEFTPIX[l.i - GRID], l.x, 0, l.w, H, 0));
         for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
         const all = new Uint32Array(ops.reduce((n, o) => n + o.length, 0));
         ops.reduce((at, o) => { all.set(o, at); return at + o.length; }, 0);
@@ -633,15 +678,24 @@ function main() {
     }
     function claims() {                               // the shortcuts and the buttons shown (none while booting)
         if (!boot.up) return gpu.claim([]);
-        gpu.claim(shownSlots().map((x) => ({ x, y: 0, w: SW, h: H })).concat(shownButtons().map((b) => ({ x: b.x - EXT_MAX, y: 0, w: drawW(L), h: H }))));
+        const cl = shownSlots().map((x) => ({ x, y: 0, w: SW, h: H }));
+        for (const l of leftLayout()) cl.push({ x: l.x, y: 0, w: l.w, h: H });
+        for (const b of shownButtons()) cl.push({ x: b.x - EXT_MAX, y: 0, w: drawW(L), h: H });
+        gpu.claim(cl);
     }
     function targetAt(x) {
         const i = shownSlots().findIndex((l) => x >= l && x < l + SW);
         if (i >= 0) return i;
+        const l = leftLayout().find((o) => x >= o.x && x < o.x + o.w);
+        if (l) return l.i;
         const b = shownButtons().find((c) => x >= c.x && x < c.x + BW);
         return b ? b.key : -1;
     }
-    const redrawAll = () => { shownSlots().forEach((x, i) => drawSlot(i)); shownButtons().forEach((b) => drawButtonKey(b.key)); claims(); frame(); };
+    const redrawAll = () => {
+        shownSlots().forEach((x, i) => drawSlot(i));
+        for (let i = GRID; i < SLOTS; i++) drawLeftSlot(i);
+        shownButtons().forEach((b) => drawButtonKey(b.key)); claims(); frame();
+    };
 
     /* hmictl serve: one line out, one line back, in order; "ev" lines are notifications */
     let child = null, out = '', busy = null, busyTimer = null;
@@ -1000,6 +1054,7 @@ function main() {
     gpu.mode('layer');
     gpu.place({ x: L.x, y: L.y, w: L.w, h: L.h, scale: 1, ox: 0, oy: 0 });
     L.slots.forEach((x, i) => gpu.pixmap(i + 1, SW, H, 'rgba', 'linear'));
+    LEFTPIX.forEach((p) => gpu.pixmap(p, L.left.maxw, H, 'rgba', 'linear'));
     Object.keys(PIX).forEach((k) => gpu.pixmap(PIX[k], drawW(L), H, 'rgba', 'linear'));
     /* boot (BOOT): hidden, claiming nothing, until AFTER_MS after the start with the HMI up; armed again after a sleep */
     function arm(why, since, wake) {
@@ -1171,8 +1226,10 @@ function test() {
     assert.deepStrictEqual(iconOf({ state: 7, applet: 91 }, []), { builtin: 'nav' });
     assert.deepStrictEqual(defaults()[1], { state: 7, applet: 91 });
     learned = {};
-    assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }, { state: 20000, applet: 4 }]);
-    assert.strictEqual(defaults().length, SLOTS, 'five default slots');
+    // 5 grid slots, then the 2 left-zone slots: the first wears the M (so it shows), the second is hidden until given an icon
+    assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }, { state: 20000, applet: 4 },
+        { state: 20000, applet: 4, icon: 'm-color' }, { state: 20000, applet: 4 }]);
+    assert.strictEqual(defaults().length, SLOTS, 'seven default slots');
     assert.deepStrictEqual(mergeSettings(SETTINGS, { shift: { on: false, flash: 7000 } }).shift, { on: false, auto: true, start: 4500, flash: 7000, hud: true });
     assert.strictEqual(SETTINGS.order, 'up', 'defaults untouched');
     // taps: up 1 -> 2 -> 3 -> off, down 3 -> 2 -> 1 -> off
@@ -1256,8 +1313,10 @@ function test() {
     for (let y = 10; y < 130; y++) for (let x = 20; x < 120; x++) tile.data[(y * 140 + x) * 4 + 3] = 255;
     const tt = trim(tile), tf = png.fit(tt, APP_GLYPH);
     assert.deepStrictEqual([tt.w, tt.h, tf.w, tf.h], [100, 120, 37, APP_GLYPH]);
-    // the shortcut icons are drawn at their final size: 76 px (no scaling, no blur), the glyph about the car's own
-    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.w <= 84 && im.h <= 84, n); });
+    // the shortcut icons are drawn at their final size: 76 px (no scaling, no blur), the glyph about the car's own. A
+    // wide left-zone logo (m-color) is the exception: any width, fitted to the icon height at draw time
+    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.h <= 84 && (n === 'm-color' || im.w <= 84), n); });
+    assert.deepStrictEqual([png.fitH({ w: 238, h: 84, data: new Uint8Array(238 * 84 * 4) }, 76).w, png.fitH({ w: 40, h: 40, data: new Uint8Array(40 * 40 * 4) }, 76).w], [215, 40], 'fitH: wide to its height, small left alone');
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
     seats.test();
