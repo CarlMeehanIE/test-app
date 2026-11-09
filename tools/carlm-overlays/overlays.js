@@ -154,7 +154,7 @@ const SIDES = ['left', 'right'];                     // where the steering wheel
 // alignment: a car whose bar is not where LAYOUT measured it (another HMI build, a right-hand drive car's mirrored bar):
 // px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
 // y its icon up / down; kept within these
-const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24 }, AXES = ['x', 'ix', 'y', 'ly'];
+const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24, lx: 240 }, AXES = ['x', 'ix', 'y', 'ly', 'lx'];
 const clampAlign = (v, axis) => Math.max(-ALIGN_MAX[axis], Math.min(ALIGN_MAX[axis], v));
 /* a button's total offset: its own plus 'all' */
 const alignOf = (set, key) => {
@@ -165,7 +165,7 @@ const alignOf = (set, key) => {
 };
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
-    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0, ly: 0 }; return o; }, {}),
+    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0, ly: 0, lx: 0 }; return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
@@ -502,20 +502,31 @@ function slantBar(w, h, s, rgb) {
 // MASK_PAD: the near-black cover is this many px taller than our line, above and below, so the car's own accent line
 // (a touch thicker, or a touch off) is hidden under ours rather than peeking out as a second line
 const MASK_PAD = 4;
-function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly) {
-    const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED, ly = L.lineY + (dly | 0);
+// EXT_MAX: the button is drawn on a wider surface with this much spare each side, so the accent line can be lengthened
+// (lx) past the button into the car's own continuous line. DRAW_W is that surface; the button sits in its middle.
+const EXT_MAX = 240;
+const drawW = (L) => L.buttonW + 2 * EXT_MAX;
+/* draws into a drawW(L)-wide surface; the button occupies [EXT_MAX, EXT_MAX + buttonW). dlx: the line's extension,
+ * negative left / positive right, past the button, to sit into the car's own line. */
+function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx) {
+    const DW = drawW(L), BW = L.buttonW, bx = EXT_MAX, on = level > 0, rgb = kind === 'cool' ? BLUE : RED, ly = L.lineY + (dly | 0);
     // pressed: a soft box over the button, above its accent line, like the HMI's own
-    if (pressed) blend(px, BW, 4, 8, pill(BW - 8, ly - 14, 0, 14, 0.14), 1);
+    if (pressed) blend(px, DW, bx + 4, 8, pill(BW - 8, ly - 14, 0, 14, 0.14), 1);
     if (img) {
-        const cx = BW / 2 + ICON_DX + (dx | 0);
-        blend(px, BW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
+        const cx = bx + BW / 2 + ICON_DX + (dx | 0);
+        blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
     }
     if (!on) return;
+    const bar = (x0, w) => { if (w <= 0) return; blend(px, DW, x0, ly - MASK_PAD, pill(w, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
+        blend(px, DW, x0, ly, slantBar(w, L.lineH, SLANT, rgb), 1); };
+    const lx = dlx | 0;
+    if (lx < 0) bar(bx - Math.min(EXT_MAX, -lx), Math.min(EXT_MAX, -lx));          // extend left, into the car's line
+    if (lx > 0) bar(bx + BW, Math.min(EXT_MAX, lx));                               // extend right
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
-    blend(px, BW, 0, ly - MASK_PAD, pill(BW, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
+    blend(px, DW, bx, ly - MASK_PAD, pill(BW, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
     for (let i = 0; i < n; i++) {
-        const x0 = Math.round(i * (sw + SEG_GAP)), x1 = Math.round(i * (sw + SEG_GAP) + sw);
-        blend(px, BW, x0, ly, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
+        const x0 = bx + Math.round(i * (sw + SEG_GAP)), x1 = bx + Math.round(i * (sw + SEG_GAP) + sw);
+        blend(px, DW, x0, ly, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
     }
 }
 
@@ -583,9 +594,9 @@ function main() {
         const [seat, kind] = key.split('.');
         // the HMI's icon for the spot it is drawn in (a right-hand drive car: the driver's buttons in the right-hand spots)
         picture({ builtin: kind === 'wheel' ? 'hmi-wheel' : `hmi-${kind}-${spotSeat(seat, settings.side)}` }, (img) => {
-            const px = Buffer.alloc(BW * H * 4);
-            const a = alignOf(settings, key); drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, a.y, a.ix, a.ly);
-            gpu.pixels(PIX[key], [{ x: 0, y: 0, w: BW, h: H }], px);
+            const DW = drawW(L), px = Buffer.alloc(DW * H * 4);
+            const a = alignOf(settings, key); drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, a.y, a.ix, a.ly, a.lx);
+            gpu.pixels(PIX[key], [{ x: 0, y: 0, w: DW, h: H }], px);
             frame();
         }, HMI_PX);
     }
@@ -597,14 +608,14 @@ function main() {
     const draw = (k) => (typeof k === 'number' ? (k >= 0 ? drawSlot(k) : null) : drawButtonKey(k));
     function frame() {
         const ops = shownSlots().map((x, i) => imageOp(i + 1, x, 0, SW, H, 0));
-        for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x, 0, BW, H, 0));
+        for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
         const all = new Uint32Array(ops.reduce((n, o) => n + o.length, 0));
         ops.reduce((at, o) => { all.set(o, at); return at + o.length; }, 0);
         gpu.frameWords(all);
     }
     function claims() {                               // the shortcuts and the buttons shown (none while booting)
         if (!boot.up) return gpu.claim([]);
-        gpu.claim(shownSlots().map((x) => ({ x, y: 0, w: SW, h: H })).concat(shownButtons().map((b) => ({ x: b.x, y: 0, w: BW, h: H }))));
+        gpu.claim(shownSlots().map((x) => ({ x, y: 0, w: SW, h: H })).concat(shownButtons().map((b) => ({ x: b.x - EXT_MAX, y: 0, w: drawW(L), h: H }))));
     }
     function targetAt(x) {
         const i = shownSlots().findIndex((l) => x >= l && x < l + SW);
@@ -971,7 +982,7 @@ function main() {
     gpu.mode('layer');
     gpu.place({ x: L.x, y: L.y, w: L.w, h: L.h, scale: 1, ox: 0, oy: 0 });
     L.slots.forEach((x, i) => gpu.pixmap(i + 1, SW, H, 'rgba', 'linear'));
-    Object.keys(PIX).forEach((k) => gpu.pixmap(PIX[k], BW, H, 'rgba', 'linear'));
+    Object.keys(PIX).forEach((k) => gpu.pixmap(PIX[k], drawW(L), H, 'rgba', 'linear'));
     /* boot (BOOT): hidden, claiming nothing, until AFTER_MS after the start with the HMI up; armed again after a sleep */
     function arm(why, since) {
         Object.assign(boot, { since, hmiAt: 0, up: false });
@@ -1084,12 +1095,12 @@ function test() {
     assert.strictEqual(mergeSettings(rhd, { side: 'middle' }).side, 'right', 'a bad side: kept');
     // alignment: per button plus 'all', x moves the button (kept on the bar), clamped; partial updates keep the other axis
     const al = mergeSettings(SETTINGS, { align: { 'driver.heat': { x: 7, y: -3 }, all: { x: -2 }, 'passenger.cool': { x: 999, y: 'no' }, bogus: { x: 1 } } });
-    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3, ly: 0 }, { x: -2, ix: 0, y: 0, ly: 0 }, { x: 120, ix: 0, y: 0, ly: 0 }, undefined]);
-    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3, ly: 0 });
+    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3, ly: 0, lx: 0 }, { x: -2, ix: 0, y: 0, ly: 0, lx: 0 }, { x: 120, ix: 0, y: 0, ly: 0, lx: 0 }, undefined]);
+    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3, ly: 0, lx: 0 });
     assert.strictEqual(keys(heatOnly, al), 'driver.heat@893 passenger.heat@2484');
-    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4, ly: 0 });
+    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4, ly: 0, lx: 0 });
     assert.strictEqual(keys(all, mergeSettings(SETTINGS, { align: { 'driver.wheel': { x: -100 } } })).split(' ')[0], 'driver.wheel@0', 'kept on the bar');
-    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0, ly: 0 }, 'defaults: centred');
+    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0, ly: 0, lx: 0 }, 'defaults: centred');
     // ly: the accent line's own vertical offset (onto the car's line), clamped
     assert.deepStrictEqual([mergeSettings(SETTINGS, { align: { 'driver.heat': { ly: 9 } } }).align['driver.heat'].ly, mergeSettings(SETTINGS, { align: { all: { ly: 999 } } }).align.all.ly], [9, 24]);
     const ia = mergeSettings(SETTINGS, { align: { all: { ix: 2 }, 'driver.heat': { ix: -7 }, 'driver.cool': { ix: 99 } } });
@@ -1179,14 +1190,19 @@ function test() {
     assert.deepStrictEqual(ev, ['tap0', 'hold2', 'tappassenger.heat']);
     // a button: off = white icon, no line; on = coloured icon + the accent line under the whole button
     const icon = { w: 10, h: 10, data: Buffer.alloc(400, 255) };
-    const btn = (kind, level, max) => { const px = Buffer.alloc(LAYOUT.buttonW * LAYOUT.h * 4); drawButton(px, LAYOUT, kind, icon, level, false, max); return px; };
-    const at4 = (px, x, y) => Array.from(px.slice((y * LAYOUT.buttonW + x) * 4, (y * LAYOUT.buttonW + x) * 4 + 4));
+    const DWt = LAYOUT.buttonW + 2 * EXT_MAX;
+    const btn = (kind, level, max, lx) => { const px = Buffer.alloc(DWt * LAYOUT.h * 4); drawButton(px, LAYOUT, kind, icon, level, false, max, 0, 0, 0, lx || 0); return px; };
+    const at4 = (px, x, y) => Array.from(px.slice((y * DWt + EXT_MAX + x) * 4, (y * DWt + EXT_MAX + x) * 4 + 4));   // x is button-relative
     const heatOn = btn('heat', 2, 3), coolOn = btn('cool', 1, 3), heatOff = btn('heat', 0, 3), wheelOn = btn('wheel', 1, 1);
     const lineBottom = LAYOUT.lineY + LAYOUT.lineH - 1;
     assert.deepStrictEqual(at4(heatOn, 0, lineBottom), RED.concat(255), 'heat on: red line from the button\'s left (bottom row)');
     // the slant "/": top row starts SLANT px in and runs to the segment's end, the bottom row the other way round
     assert.deepStrictEqual([at4(heatOn, 0, LAYOUT.lineY), at4(heatOn, 35, LAYOUT.lineY), at4(heatOn, 35, lineBottom)],
         [BAR_BG.concat(255), RED.concat(255), BAR_BG.concat(255)], 'segments lean right like the HMI\'s bars');
+    // lx: the line runs past the button's left edge once extended (bar-bg there without it)
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, 0), -40, lineBottom), [0, 0, 0, 0], 'no extension: nothing left of the button');
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, -80), -40, lineBottom), RED.concat(255), 'extended left: red past the button');
+    assert.deepStrictEqual(at4(btn('cool', 1, 3, 60), LAYOUT.buttonW + 30, lineBottom), BLUE.concat(255), 'extended right: blue past the button');
     // the level: 3 segments of 36 px, 6 px apart (0-35, 42-77, 84-119); the gaps the bar's colour (the HMI's line hidden)
     assert.deepStrictEqual([at4(heatOn, 50, LAYOUT.lineY), at4(heatOn, 100, LAYOUT.lineY), at4(heatOn, 38, LAYOUT.lineY)],
         [RED.concat(255), DIM_SEG.concat(255), BAR_BG.concat(255)], 'heat 2 of 3: two red segments, one dim');
