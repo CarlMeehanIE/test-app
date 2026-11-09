@@ -197,10 +197,13 @@ const FLASH_MS = 5000, FLASH_AFTER_MS = 10000;      // ponytail: no flash for th
 // boot, or a wake from sleep; a tester 2026-11-07: 1 min too long, 10-15 s enough) and only once the HMI answers its
 // graphical context (HMIContext2); it stays over the cameras after that. No HMI answer by MAX_MS: shown all the same.
 // A restart of the tool later (an update) shows it at once.
-const BOOT = { AFTER_MS: 15000, MAX_MS: 60000 };
-function bootGate(now, b) {                          // b: { since (the start), hmiAt (0: not yet) } -> why up, or null
-    if (b.hmiAt && now - b.since >= BOOT.AFTER_MS) return 'HMI up';
-    return now - b.since >= BOOT.MAX_MS ? 'timeout' : null;
+// a cold boot waits out the M start animation (AFTER_MS); a wake from sleep has no animation, so it shows as soon as the
+// HMI answers its context, with only a short floor (WAKE_AFTER_MS) to let the home screen compose
+const BOOT = { AFTER_MS: 15000, MAX_MS: 60000, WAKE_AFTER_MS: 1500, WAKE_MAX_MS: 12000 };
+function bootGate(now, b) {                          // b: { since (the start), hmiAt (0: not yet), wake } -> why up, or null
+    const after = b.wake ? BOOT.WAKE_AFTER_MS : BOOT.AFTER_MS, max = b.wake ? BOOT.WAKE_MAX_MS : BOOT.MAX_MS;
+    if (b.hmiAt && now - b.since >= after) return 'HMI up';
+    return now - b.since >= max ? 'timeout' : null;
 }
 /** when the head unit started: now less its uptime (/proc/uptime counts sleep too: a wake is told by the tick gap) */
 function bootedAt() {
@@ -555,7 +558,7 @@ function main() {
     const SW = L.slotW, H = L.h, BW = L.buttonW, ICON_MAX = 76, HMI_PX = 84;
     const pics = {}, flash = [0, 0, 0, 0], looks = [], failAt = [0, 0, 0, 0];
     let notice = null;                                // the last tap that did nothing: { slot, title, at }
-    const boot = { since: 0, hmiAt: 0, up: false };    // BOOT: shown once up
+    const boot = { since: 0, hmiAt: 0, up: false, wake: false };    // BOOT: shown once up; wake = a sleep, not a cold boot
     const st = seats.state(!!process.env.OVERLAYS_SEAT_DEMO);
     const readAA = aa.reader();
     let aaNow = { connected: false, via: null, pid: null };
@@ -999,11 +1002,11 @@ function main() {
     L.slots.forEach((x, i) => gpu.pixmap(i + 1, SW, H, 'rgba', 'linear'));
     Object.keys(PIX).forEach((k) => gpu.pixmap(PIX[k], drawW(L), H, 'rgba', 'linear'));
     /* boot (BOOT): hidden, claiming nothing, until AFTER_MS after the start with the HMI up; armed again after a sleep */
-    function arm(why, since) {
-        Object.assign(boot, { since, hmiAt: 0, up: false });
+    function arm(why, since, wake) {
+        Object.assign(boot, { since, hmiAt: 0, up: false, wake: !!wake });
         gpu.show(false);
         claims();
-        log(`boot: strip hidden (${why}) until ${Math.round(BOOT.AFTER_MS / 1000)} s after the start with the HMI up`);
+        log(`boot: strip hidden (${why}) until ${Math.round((wake ? BOOT.WAKE_AFTER_MS : BOOT.AFTER_MS) / 1000)} s after the start with the HMI up`);
     }
     function bootTick() {
         if (boot.up) return;
@@ -1050,7 +1053,7 @@ function main() {
         const now = Date.now();
         if (now - tickAt >= WAKE_MS) {
             log(`woke up after ${Math.round((now - tickAt) / 1000)} s`);
-            arm('woke up', now);                        // hide at once; shown again AFTER_MS later with the HMI up
+            arm('woke up', now, true);                  // hide at once; shown again as soon as the HMI is up (no M animation on a wake)
             if (m.sp18 || m.setup) mReset(m);
         }
         tickAt = now;
@@ -1069,6 +1072,9 @@ function test() {
     const b0 = { since: 0, hmiAt: 0 }, hmiUp = { since: 0, hmiAt: 4000 };
     assert.deepStrictEqual([bootGate(5000, b0), bootGate(10000, hmiUp), bootGate(14999, hmiUp), bootGate(15000, hmiUp), bootGate(30000, b0),
         bootGate(60000, b0)], [null, null, null, 'HMI up', null, 'timeout']);
+    // a wake from sleep: shown as soon as the HMI is up past a short floor, not after the full cold-boot delay
+    const wUp = { since: 0, hmiAt: 500, wake: true }, wNo = { since: 0, hmiAt: 0, wake: true };
+    assert.deepStrictEqual([bootGate(1499, wUp), bootGate(1500, wUp), bootGate(11999, wNo), bootGate(12000, wNo)], [null, 'HMI up', null, 'timeout']);
     const apps = [{ id: 'iteriodev_cardash', appletId: 20097 }, { id: 'robertn_store', appletId: 20650 }];
     assert.deepStrictEqual(classify(3000, 23097, apps), { app: 'iteriodev_cardash', state: 3000, offset: 3000 });
     assert.deepStrictEqual(classify(5, 20650, apps), { app: 'robertn_store', state: 5, offset: 0 });
