@@ -1042,13 +1042,19 @@ function main() {
     }, aa.POLL_MS);
     setInterval(reread, REREAD_MS);
     setInterval(sl.tick, 500);
+    // the head unit slept (the car off) and woke: re-gate the strip and drop the M setup. Checked often (not every few
+    // seconds) so the strip is hidden again within a fraction of a second of the wake, before it can sit on the black
+    // screen while the HMI's home screen is still coming up.
     let tickAt = Date.now();
-    setInterval(() => {                              // the head unit slept (the car off): no M setup now
+    setInterval(() => {
         const now = Date.now();
-        if (now - tickAt >= WAKE_MS && (m.sp18 || m.setup)) { log(`woke up after ${Math.round((now - tickAt) / 1000)} s: no M setup`); mReset(m); }
-        if (now - tickAt >= WAKE_MS) arm('woke up', now);   // a start after a sleep: its animation too
+        if (now - tickAt >= WAKE_MS) {
+            log(`woke up after ${Math.round((now - tickAt) / 1000)} s`);
+            arm('woke up', now);                        // hide at once; shown again AFTER_MS later with the HMI up
+            if (m.sp18 || m.setup) mReset(m);
+        }
         tickAt = now;
-    }, 5000);
+    }, 250);
     process.on('SIGTERM', () => { gpu.close(); sl.close(); if (child) child.kill(); process.exit(0); });
     arm('start', bootedAt());
     setInterval(bootTick, 1000);
