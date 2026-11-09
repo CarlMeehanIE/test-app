@@ -50,6 +50,7 @@ const LEGACY_NONE = [31, 31, 31, 31, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0];
 const AUTO_EV = 0x8031, AURA_EV = 0x802b, AUTO_AT = { driver: 4, passenger: 5 };
 const AURA_AT = { 'driver.heat': 0, 'passenger.heat': 1, 'driver.cool': 2, 'passenger.cool': 3 };
 const AURA_NONE = [15, 15, 15, 15, 15, 15, 3, 3, 3, 3, 3, 3, 3, 3, 3], AURA_MAX = 4;
+const HEAT_STEPS = 4;   // seat heating shows at most 4 segments (Low / Medium / High / Very high)
 
 function state(demo) {
     const st = { backend: demo ? 'demo' : null, seats: {}, wheel: { have: !!demo, level: 0, max: 1, src: demo ? 'demo' : null },
@@ -101,9 +102,11 @@ function apply(st, svc, ev, hex) {
             for (const e of elements(b, 6)) {
                 const s = seatOf(e[4]);
                 if (!s) continue;
-                const k = st.seats[s][ev === 0x802a ? 'heat' : 'cool'];
-                k.level = e[0];
-                if (e[3]) k.max = e[3];
+                const heat = ev === 0x802a, k = st.seats[s][heat ? 'heat' : 'cool'];
+                // seat heating is 4 steps (Low / Medium / High / Very high); some climate units report max 5 (an extra
+                // step the HMI never shows), which would draw a 5th segment, so cap heat at 4. Ventilation is left as reported.
+                k.level = heat ? Math.min(e[0], HEAT_STEPS) : e[0];
+                if (e[3]) k.max = heat ? Math.min(e[3], HEAT_STEPS) : e[3];
             }
         }
     } else if (svc === LEGACY && st.backend !== 'master' && (LEGACY_EV[ev] || ev === AUTO_EV || ev === AURA_EV)) {
@@ -163,6 +166,11 @@ function test() {
     assert(apply(st, MASTER, 0x8036, '0000000c' + '01010000' + '02010000' + '01020000'));
     assert(apply(st, MASTER, 0x802a, '0000000c' + '020200030100' + '000000030200'));
     assert.deepStrictEqual(st.seats.driver, { heat: { have: true, level: 2, max: 3 }, cool: { have: true, level: 0, max: 3 } });
+    // a climate unit reporting heat max 5 (and level 5) is capped to 4 steps; ventilation is left as reported
+    assert(apply(st, MASTER, 0x802a, '00000006' + '050500050100'));
+    assert.deepStrictEqual(st.seats.driver.heat, { have: true, level: 4, max: 4 }, 'heat capped to 4 steps');
+    assert(apply(st, MASTER, 0x8038, '00000006' + '050500050100'));
+    assert.deepStrictEqual(st.seats.driver.cool.max, 5, 'ventilation max left as reported');
     assert.deepStrictEqual(st.seats.passenger.cool.have, false);
     assert.strictEqual(request(st, 'passenger', 'heat', 1), 'call 0xb09a 1 41 1 0400000003010201');
     assert.strictEqual(apply(st, LEGACY, 0x8013, '00'), false);              // master wins once seen

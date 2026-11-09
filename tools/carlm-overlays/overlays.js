@@ -521,21 +521,18 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlh
         const cx = bx + BW / 2 + ICON_DX + (dx | 0);
         blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : DIM_SEG), 1);
     }
-    // the steering wheel is on / off only - no accent line in any state, just the icon (red on, grey off), like the HMI
-    if (kind === 'wheel') return;
-    // The accent line is always drawn, in every state: a left connector (up to a gap before the first segment), the
-    // segment track, and an optional right extension. Off -> all grey; on -> red / blue on the connector and the lit
-    // segments, grey on the rest. One black mask runs under the whole span so the car's own accent line (which we can't
-    // remove) can't show through the gaps - it is covered, and only our own pieces sit on top.
-    // gbx: the whole line block (connector + segments + right extension) moved left / right by lhx, apart from the icon
+    // The segment track is always drawn, in every state (grey off, coloured on, black-masked gaps) - the wheel's own
+    // on / off indicator line too. To the LEFT of the first segment there is NO coloured connector: that zone is painted
+    // solid black (the mask, opaque - it covers the car's own line rather than going transparent and letting it show
+    // through), up to a gap before the first segment. The Reach tool (lx) lengthens that black zone further left into the
+    // car's line, or paints a coloured extension to the right. lhx (gbx) moves the whole block, apart from the icon.
     const lineCol = on ? rgb : DIM_SEG, lx = dlx | 0, gbx = bx + (dlhx | 0),
         leftExt = lx < 0 ? Math.min(EXT_MAX, -lx) : 0,
-        connR = gbx - SEG_GAP, connL = Math.max(0, connR - Math.min(CONN + leftExt, DW)), connW = connR - connL,
+        connL = Math.max(0, gbx - SEG_GAP - Math.min(CONN + leftExt, DW)),
         rext = lx > 0 ? Math.min(EXT_MAX, lx, DW - (gbx + BW + SEG_GAP)) : 0,
         maskR = Math.min(DW, gbx + BW + (rext > 0 ? SEG_GAP + rext : 0));
-    if (maskR > connL) blend(px, DW, connL, ly - MASK_PAD, pill(maskR - connL, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
-    if (connW > 0) blend(px, DW, connL, ly, slantBar(connW, L.lineH, SLANT, lineCol), 1);   // connector into the car's line
-    if (rext > 0) blend(px, DW, gbx + BW + SEG_GAP, ly, slantBar(rext, L.lineH, SLANT, lineCol), 1);  // past the last segment
+    if (maskR > connL) blend(px, DW, connL, ly - MASK_PAD, pill(maskR - connL, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);  // opaque black, hides the car's line
+    if (rext > 0) blend(px, DW, gbx + BW + SEG_GAP, ly, slantBar(rext, L.lineH, SLANT, lineCol), 1);  // coloured extension past the last segment
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
     for (let i = 0; i < n; i++) {
         const x0 = gbx + Math.round(i * (sw + SEG_GAP)), x1 = gbx + Math.round(i * (sw + SEG_GAP) + sw);
@@ -1213,19 +1210,20 @@ function test() {
     // the slant "/": top row starts SLANT px in and runs to the segment's end, the bottom row the other way round
     assert.deepStrictEqual([at4(heatOn, 0, LAYOUT.lineY), at4(heatOn, 35, LAYOUT.lineY), at4(heatOn, 35, lineBottom)],
         [BAR_BG.concat(255), RED.concat(255), BAR_BG.concat(255)], 'segments lean right like the HMI\'s bars');
-    // the connector: the line always runs CONN px left of the first segment, even with no extension; lx lengthens it
-    assert.deepStrictEqual(at4(btn('heat', 2, 3, 0), -40, lineBottom), RED.concat(255), 'base connector: red left of the button even without extension');
-    assert.deepStrictEqual(at4(btn('heat', 2, 3, -80), -40, lineBottom), RED.concat(255), 'extended left: red further into the car\'s line');
-    assert.deepStrictEqual(at4(btn('cool', 1, 3, 60), LAYOUT.buttonW + 30, lineBottom), BLUE.concat(255), 'extended right: blue past the button');
+    // left of the first segment: no coloured connector - that zone is solid black (opaque, hides the car's line), not red
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, 0), -40, LAYOUT.lineY), BAR_BG.concat(255), 'left zone: opaque black, not a coloured line');
+    assert.notDeepStrictEqual(at4(btn('heat', 2, 3, 0), -40, LAYOUT.lineY), [0, 0, 0, 0], 'left zone: opaque (not transparent - would show the car\'s line)');
+    assert.deepStrictEqual(at4(btn('heat', 2, 3, -80), -40, LAYOUT.lineY), BAR_BG.concat(255), 'reach left: black zone extends, still opaque');
+    assert.deepStrictEqual(at4(btn('cool', 1, 3, 60), LAYOUT.buttonW + 30, lineBottom), BLUE.concat(255), 'reach right: blue extension past the button');
     // lhx: moves the whole line block right, apart from the icon - a segment now sits where there was nothing before
     assert.deepStrictEqual([at4(heatOn, 150, lineBottom), at4(btn('heat', 2, 3, 0, 60), 150, lineBottom)], [[0, 0, 0, 0], DIM_SEG.concat(255)], 'lhx: the line block moves right');
     // the level: 3 segments of 36 px, 6 px apart (0-35, 42-77, 84-119); the gaps the bar's colour (the HMI's line hidden)
     assert.deepStrictEqual([at4(heatOn, 50, LAYOUT.lineY), at4(heatOn, 100, LAYOUT.lineY), at4(heatOn, 38, LAYOUT.lineY)],
         [RED.concat(255), DIM_SEG.concat(255), BAR_BG.concat(255)], 'heat 2 of 3: two red segments, one dim');
     assert.deepStrictEqual([at4(coolOn, 0, LAYOUT.lineY + 5), at4(coolOn, 60, LAYOUT.lineY)], [BLUE.concat(255), DIM_SEG.concat(255)], 'vent 1 of 3');
-    assert.deepStrictEqual([at4(wheelOn, 60, LAYOUT.lineY), at4(wheelOn, 60, LAYOUT.iconY)], [[0, 0, 0, 0], RED.concat(255)], 'the wheel: icon only, no line in any state');
-    // off: the line stays, drawn grey (connector + segment track), and the icon goes grey - nothing disappears
-    assert.deepStrictEqual(at4(heatOff, -40, lineBottom), DIM_SEG.concat(255), 'off: grey connector still drawn');
+    assert.deepStrictEqual([at4(wheelOn, 60, LAYOUT.lineY), at4(wheelOn, 60, LAYOUT.iconY)], [RED.concat(255), RED.concat(255)], 'the wheel: its own indicator line + icon');
+    // off: the segment track stays, drawn grey, and the icon goes grey - nothing disappears; the left zone is black
+    assert.deepStrictEqual(at4(heatOff, -40, LAYOUT.lineY), BAR_BG.concat(255), 'off: left zone still opaque black');
     assert.deepStrictEqual([at4(heatOff, 50, LAYOUT.lineY), at4(heatOff, 38, LAYOUT.lineY)], [DIM_SEG.concat(255), BAR_BG.concat(255)], 'off: grey segments, black gaps');
     assert.deepStrictEqual(at4(heatOn, 60, LAYOUT.iconY), RED.concat(255), 'heat icon centred over its line (60)');
     assert.deepStrictEqual(at4(heatOff, 60, LAYOUT.iconY), DIM_SEG.concat(255), 'off: grey icon');
