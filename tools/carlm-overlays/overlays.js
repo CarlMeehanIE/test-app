@@ -153,7 +153,7 @@ const SIDES = ['left', 'right'];                     // where the steering wheel
 // alignment: a car whose bar is not where LAYOUT measured it (another HMI build, a right-hand drive car's mirrored bar):
 // px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
 // y its icon up / down; kept within these
-const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20 }, AXES = ['x', 'ix', 'y'];
+const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24 }, AXES = ['x', 'ix', 'y', 'ly'];
 const clampAlign = (v, axis) => Math.max(-ALIGN_MAX[axis], Math.min(ALIGN_MAX[axis], v));
 /* a button's total offset: its own plus 'all' */
 const alignOf = (set, key) => {
@@ -164,7 +164,7 @@ const alignOf = (set, key) => {
 };
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
-    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0 }; return o; }, {}),
+    align: ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0, ly: 0 }; return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
@@ -496,20 +496,23 @@ function slantBar(w, h, s, rgb) {
     }
     return { w, h, data };
 }
-function drawButton(px, L, kind, img, level, pressed, max, dy, dx) {
-    const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED;
+// MASK_PAD: the near-black cover is this many px taller than our line, above and below, so the car's own accent line
+// (a touch thicker, or a touch off) is hidden under ours rather than peeking out as a second line
+const MASK_PAD = 4;
+function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly) {
+    const BW = L.buttonW, on = level > 0, rgb = kind === 'cool' ? BLUE : RED, ly = L.lineY + (dly | 0);
     // pressed: a soft box over the button, above its accent line, like the HMI's own
-    if (pressed) blend(px, BW, 4, 8, pill(BW - 8, L.lineY - 14, 0, 14, 0.14), 1);
+    if (pressed) blend(px, BW, 4, 8, pill(BW - 8, ly - 14, 0, 14, 0.14), 1);
     if (img) {
         const cx = BW / 2 + ICON_DX + (dx | 0);
         blend(px, BW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : WHITE), on ? 1 : OFF_ALPHA);
     }
     if (!on) return;
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
-    blend(px, BW, 0, L.lineY, pill(BW, L.lineH, 0, 0, 1, BAR_BG), 1);
+    blend(px, BW, 0, ly - MASK_PAD, pill(BW, L.lineH + 2 * MASK_PAD, 0, 0, 1, BAR_BG), 1);
     for (let i = 0; i < n; i++) {
         const x0 = Math.round(i * (sw + SEG_GAP)), x1 = Math.round(i * (sw + SEG_GAP) + sw);
-        blend(px, BW, x0, L.lineY, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
+        blend(px, BW, x0, ly, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
     }
 }
 
@@ -578,7 +581,7 @@ function main() {
         // the HMI's icon for the spot it is drawn in (a right-hand drive car: the driver's buttons in the right-hand spots)
         picture({ builtin: kind === 'wheel' ? 'hmi-wheel' : `hmi-${kind}-${spotSeat(seat, settings.side)}` }, (img) => {
             const px = Buffer.alloc(BW * H * 4);
-            drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, alignOf(settings, key).y, alignOf(settings, key).ix);
+            const a = alignOf(settings, key); drawButton(px, L, kind, img, shown(key), gestures.pressed() === key, state(key).max, a.y, a.ix, a.ly);
             gpu.pixels(PIX[key], [{ x: 0, y: 0, w: BW, h: H }], px);
             frame();
         }, HMI_PX);
@@ -1078,12 +1081,14 @@ function test() {
     assert.strictEqual(mergeSettings(rhd, { side: 'middle' }).side, 'right', 'a bad side: kept');
     // alignment: per button plus 'all', x moves the button (kept on the bar), clamped; partial updates keep the other axis
     const al = mergeSettings(SETTINGS, { align: { 'driver.heat': { x: 7, y: -3 }, all: { x: -2 }, 'passenger.cool': { x: 999, y: 'no' }, bogus: { x: 1 } } });
-    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3 }, { x: -2, ix: 0, y: 0 }, { x: 120, ix: 0, y: 0 }, undefined]);
-    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3 });
+    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3, ly: 0 }, { x: -2, ix: 0, y: 0, ly: 0 }, { x: 120, ix: 0, y: 0, ly: 0 }, undefined]);
+    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3, ly: 0 });
     assert.strictEqual(keys(heatOnly, al), 'driver.heat@893 passenger.heat@2484');
-    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4 });
+    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4, ly: 0 });
     assert.strictEqual(keys(all, mergeSettings(SETTINGS, { align: { 'driver.wheel': { x: -100 } } })).split(' ')[0], 'driver.wheel@0', 'kept on the bar');
-    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0 }, 'defaults: centred');
+    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0, ly: 0 }, 'defaults: centred');
+    // ly: the accent line's own vertical offset (onto the car's line), clamped
+    assert.deepStrictEqual([mergeSettings(SETTINGS, { align: { 'driver.heat': { ly: 9 } } }).align['driver.heat'].ly, mergeSettings(SETTINGS, { align: { all: { ly: 999 } } }).align.all.ly], [9, 24]);
     const ia = mergeSettings(SETTINGS, { align: { all: { ix: 2 }, 'driver.heat': { ix: -7 }, 'driver.cool': { ix: 99 } } });
     assert.deepStrictEqual([alignOf(ia, 'driver.heat').ix, alignOf(ia, 'driver.cool').ix, keys(heatOnly, ia)], [-5, 40, 'driver.heat@888 passenger.heat@2486'],
         'ix: the icon alone, the button stays');

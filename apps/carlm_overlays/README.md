@@ -2,7 +2,7 @@
 
 Set up the Overlays strip in the climate bar: what each of the four shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to. Needs the Overlays tool from the same source.
 
-Version 1.13.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
+Version 1.14.0 · iDrive 8 only · package `carlm_overlays` · [all apps and how to install](../../README.md)
 
 > [!NOTE]
 > The strip in the climate bar is car-tested (G82); the app's pages are not yet. Needs the Overlays tool (the Store installs it with the app).
@@ -39,7 +39,7 @@ Tap order, the ambient light flash and its colours, the steering wheel's side (*
 
 ![Align](screenshots/align.png)
 
-Hidden until you tap *Developed by IterioDev and RobertNisipeanu* (top right of any page) 5 times; 5 more hide it again. When a seat or steering wheel icon in the bar is not quite over the car's own spot: an arrow pad each for the heated seat (driver or passenger), the steering wheel heating, and the other buttons (all of them at once, or a seat's ventilation). Tap the arrows while you watch the climate bar, 1 or 5 px at a time; the middle button resets that one. *Arrows move: Button* moves the whole button (icon, coloured line and touch area) left / right; *Icon* moves the icon alone inside it; up / down always moves the icon. *Show BMW's own* hides the strip's seat and wheel buttons for 20 s so the car's own show: line the button up with them, then centre the icon. Kept over updates. Needs the eOverlays tool 0.7.0.
+Hidden until you tap *Developed by IterioDev and RobertNisipeanu* (top right of any page) 5 times; 5 more hide it again. When a seat or steering wheel icon in the bar is not quite over the car's own spot: an arrow pad each for the heated seat (driver or passenger), the steering wheel heating, and the other buttons (all of them at once, or a seat's ventilation). Tap the arrows while you watch the climate bar, 1 or 5 px at a time; the middle button resets that one. *Arrows move: Button* moves the whole button (icon, coloured line and touch area); *Icon* moves the icon alone; *Line* slides the coloured line up / down on its own, to sit it on the car's own accent line (a taller mask hides the car's line under ours, so there is one clean line, not two). *Show BMW's own* hides the strip's seat and wheel buttons for 20 s so the car's own show: line the button up with them, then centre the icon. Kept over updates. Needs the eOverlays tool 0.7.0.
 
 ### Finder (hidden)
 
