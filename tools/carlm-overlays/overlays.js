@@ -26,7 +26,7 @@
  * icons can't be drawn here, so those apps, and BMW screens the strip has no icon for, get a plain one.
  * A slot's own icon (slot.icon, picked in the app; ICON_LIB, icons/lib/<name>.png) replaces its picture in the strip; it
  * stays with the slot when what it opens changes (a hold, the app's picker), until set back to the default (null).
- * Data: /var/opt/carlm-overlays/slots.json { slots: [4 x {state, applet} | {app, state, offset}, + icon?], settings, mcar,
+ * Data: /var/opt/carlm-overlays/slots.json { slots: [SLOTS x {state, applet} | {app, state, offset}, + icon?], settings, mcar,
  * learned, vents (legacy cars: ventilation seen on, per seat), layout? }. VM ids (2026-11-01): Media 2 23, Nav 1 32, Phone 24 34, All apps 20 4, Home 20000 4, Climate 3 517.
  *   node overlays.js          the service (OVERLAYS_SEAT_DEMO=1: seats without a car, for the VM)
  *   node overlays.js --test   the self-check (no car needed)
@@ -55,13 +55,14 @@ const OFFSETS = [0, 3000];                   // an app's RHMI application agains
 // The HMI's seat buttons are 120 px wide, their accent line at y 99-104 of the bar, and the icon sits ICON_DX right of
 // the button's centre on every button (not mirrored): heat 864-983 (21 px right of a temperature), ventilation
 // 222-341 / 1844-1963 (24 px left of one), measured with the HMI's own icons on; passenger heat by the driver's
-const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685], slotW: 140, buttonW: 120,
+const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 1835], slotW: 140, buttonW: 120,
     // the bar's LEFT seat buttons 24 px right of IterioDev's measure: there the HMI's own button and accent line sit on
     // this car (video 2026-11-08: its line ran on past the right end of ours, the press box covered only part of the
     // button, a tap at its right end reached the HMI). The RIGHT ones stay as measured (2nd video: moved 24 px too, the
     // HMI's line showed left of ours instead)
     buttons: { 'driver.wheel': 20, 'driver.cool': 246, 'driver.heat': 888, 'passenger.cool': 1844, 'passenger.heat': 2486 },
     iconY: 55, lineY: 99, lineH: 6 };
+const SLOTS = LAYOUT.slots.length;   // 5: four around CLIMATE MENU, a fifth at the free cooled-seat spot
 // IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
 // against the accent line, so the icon sits centred over it
 const ICON_DX = 0;
@@ -128,7 +129,7 @@ const AA_LIVE = 'android-auto-color', AA_OFF = 'android-auto';
 const iconName = (n) => (typeof n === 'string' && ICON_LIB.some((x) => x[0] === n) ? n : null);
 let learned = {};                                    // title -> { state, applet } this car's HMI uses instead
 const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}, s, learned[s.title]) : s));
-const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps'];
+const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps', 'Home'];
 const defaults = () => DEFAULT_TITLES.map((t) => { const s = screenList().find((x) => x.title === t); return { state: s.state, applet: s.applet }; });
 const FAIL_MS = 800, REPAIR_MS = 10 * 60000;          // a tap's screen read again after; a hold that repairs it, within
 /* a tap that did nothing: the screen read before and after the open is the same, and is not the one asked for */
@@ -315,8 +316,8 @@ const slotOk = (s) => s && Number.isInteger(s.state) &&
 function loadData(file) {
     let j = {};
     try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log('slots.json: ' + e.message + ', the defaults instead'); }
-    const good = Array.isArray(j.slots) && j.slots.length === 4 && j.slots.every(slotOk);
-    if (j.slots && !good) log('slots.json: not 4 good slots, the defaults instead');
+    const good = Array.isArray(j.slots) && (j.slots.length === 4 || j.slots.length === SLOTS) && j.slots.every(slotOk);
+    if (j.slots && !good) log(`slots.json: not 4 or ${SLOTS} good slots, the defaults instead`);
     const lr = {};
     if (j.learned && typeof j.learned === 'object') {
         SCREENS.forEach((s) => { const v = j.learned[s.title]; if (v && Number.isInteger(v.state) && Number.isInteger(v.applet)) lr[s.title] = { state: v.state, applet: v.applet }; });
@@ -325,7 +326,9 @@ function loadData(file) {
     const vents = {};                                  // legacy cars: seats whose ventilation was seen on (seats.js)
     seats.SEATS.forEach((s) => { if (j.vents && j.vents[s] === true) vents[s] = true; });
     if (good) j.slots.forEach((sl) => { if (sl.icon !== undefined && !iconName(sl.icon)) delete sl.icon; });   // an icon this version lacks
-    return { slots: good ? j.slots : defaults(), layout: j.layout, learned: lr, settings: migrate(mergeSettings(SETTINGS, j.settings), j.settings),
+    let slots = good ? j.slots.slice() : defaults();
+    while (slots.length < SLOTS) slots.push(defaults()[slots.length]);   // a 4-slot file from an older version: pad to SLOTS
+    return { slots, layout: j.layout, learned: lr, settings: migrate(mergeSettings(SETTINGS, j.settings), j.settings),
         mcar: j.mcar === true, vents };
 }
 /* 0.3.5 and older had one switch for all seat buttons and one for the wheel; the per-button choice replaces them (the
@@ -535,7 +538,7 @@ function main() {
     let ventsSaved = JSON.stringify(st.legacy.seen);
     const pending = {};                               // pending['driver.heat'] = { level, until }
     const gpu = new RenderClient('carlm-overlays', { info: log, warn: log, error: log });
-    const PIX = { 'driver.wheel': 5, 'driver.cool': 6, 'driver.heat': 7, 'passenger.cool': 8, 'passenger.heat': 9 };
+    const PIX = { 'driver.wheel': 6, 'driver.cool': 7, 'driver.heat': 8, 'passenger.cool': 9, 'passenger.heat': 10 };
 
     function picture(ic, cb, max) {                   // a decoded, fitted picture; cached by file + mtime
         const file = ic.file || path.join(__dirname, 'icons', ic.builtin + '.png');
@@ -882,7 +885,7 @@ function main() {
             settings = mergeSettings(settings, q.settings);
             save(); redrawAll(); push();
             if (settings.shift.on !== was) sl.settings(); else sl.tick();
-        } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && slotOk(q.target)) {
+        } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < SLOTS && slotOk(q.target)) {
             const t = q.target, sl = t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet };
             const scr = !t.app && screenList().find((x) => x.state === t.state && x.applet === t.applet);
             if (scr && scr.title === 'Android Auto' && !iconName(slots[q.i].icon)) sl.icon = AA_LIVE;   // its live icon
@@ -894,7 +897,7 @@ function main() {
                 log(`slot ${q.i}: ${scr.title} picked, its ids not known: waiting for a hold on it`);
                 push();
             }
-        } else if (q.op === 'icon' && Number.isInteger(q.i) && q.i >= 0 && q.i < 4 && (q.icon === null || iconName(q.icon))) {
+        } else if (q.op === 'icon' && Number.isInteger(q.i) && q.i >= 0 && q.i < SLOTS && (q.icon === null || iconName(q.icon))) {
             const sl = Object.assign({}, slots[q.i]);
             if (q.icon) sl.icon = q.icon; else delete sl.icon;
             slots[q.i] = sl;
@@ -1125,7 +1128,8 @@ function test() {
     assert.deepStrictEqual(iconOf({ state: 7, applet: 91 }, []), { builtin: 'nav' });
     assert.deepStrictEqual(defaults()[1], { state: 7, applet: 91 });
     learned = {};
-    assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }]);
+    assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }, { state: 20000, applet: 4 }]);
+    assert.strictEqual(defaults().length, SLOTS, 'five default slots');
     assert.deepStrictEqual(mergeSettings(SETTINGS, { shift: { on: false, flash: 7000 } }).shift, { on: false, auto: true, start: 4500, flash: 7000, hud: true });
     assert.strictEqual(SETTINGS.order, 'up', 'defaults untouched');
     // taps: up 1 -> 2 -> 3 -> off, down 3 -> 2 -> 1 -> off
