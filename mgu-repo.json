@@ -10,24 +10,8 @@
  },
  "tools": [
   {
-   "id": "iteriodev-comfort",
-   "path": "tools/iteriodev-comfort"
-  },
-  {
-   "id": "iteriodev-drplay",
-   "path": "tools/iteriodev-drplay"
-  },
-  {
    "id": "carlm-overlays",
    "path": "tools/carlm-overlays"
-  },
-  {
-   "id": "iteriodev-screencast",
-   "path": "tools/iteriodev-screencast"
-  },
-  {
-   "id": "iteriodev-tailscale",
-   "path": "tools/iteriodev-tailscale"
   }
  ]
 }
