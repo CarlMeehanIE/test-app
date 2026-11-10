@@ -64,7 +64,7 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // the far-left empty zone (before the temperature control at x 365): one extra shortcut (the M), drawn at the HMI's
     // own icon height (so it sits the same height as the music / home / grid glyphs), any width, and centred in the zone
     // on cx (if ever more than one is shown, the whole row is centred on cx)
-    left: { cx: 115, ih: 40, gap: 28, maxw: 300 },
+    left: { cx: 115, mh: 27, gap: 28, maxw: 300 },   // mh: the M's height (wide logo, height-fit); the heat-spot shortcut is grid-icon sized (box)
     // the "passenger heat on the left" option (settings.heatLeft): the passenger heat button is redrawn here instead, left
     // of the temperature control (a gap before it, so its grey line doesn't clash with the temp's blue) and beside the M;
     // nudge on the Align page
@@ -429,10 +429,11 @@ function spot(L, key, side) {
 // "passenger heat on the left" (set.heatLeft) relocates the PASSENGER's seat-heat button (whichever side spot the drive
 // side puts it in); the driver's stays put. The side swap means this is the left button on a right-hand-drive car.
 const HEAT_MOVE_KEY = 'passenger.heat';
-/* when heatLeft is on and the passenger heat button is shown, the spot it left behind (to blank with a bar-colour mask) */
+/* when heatLeft is on and the passenger heat button is shown, the spot it left behind (its aligned position, where the
+ * car still draws the OEM icon) - the blank cover goes here, drawn with the button's own machinery so it lands over it */
 function blankSpot(L, st, set) {
     if (!set.heatLeft) return null;
-    return buttons(L, st, set).some((b) => b.key === HEAT_MOVE_KEY) ? { x: spot(L, HEAT_MOVE_KEY, set.side) } : null;
+    return buttons(L, st, set).some((b) => b.key === HEAT_MOVE_KEY) ? { x: spot(L, HEAT_MOVE_KEY, set.side) + alignOf(set, HEAT_MOVE_KEY).x } : null;
 }
 /* the seat / wheel buttons to show, [{ key, x }]: per button the user's choice ('on' / 'off'), on 'auto' what the car has;
  * the old master switches (seats, wheel) still hide theirs */
@@ -554,13 +555,17 @@ const CONN = 40;
 const drawW = (L) => L.buttonW + 2 * EXT_MAX;
 /* draws into a drawW(L)-wide surface; the button occupies [EXT_MAX, EXT_MAX + buttonW). dlx: the line's extension,
  * negative left / positive right, past the button, to sit into the car's own line. */
-function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlhx) {
+// blank (the "passenger heat on the left" cover): the icon is painted the bar colour and enlarged a little so it fully
+// hides the car's own heat icon, and no segment track is drawn - only the bar-colour line mask. Positioned exactly like a
+// real button (same spot + align), so it lands over the OEM icon the car still draws there.
+function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlhx, blank) {
     const DW = drawW(L), BW = L.buttonW, bx = EXT_MAX, on = level > 0, rgb = kind === 'cool' ? BLUE : RED, ly = L.lineY + (dly | 0);
     // pressed: a soft box over the button, above its accent line, like the HMI's own
     if (pressed) blend(px, DW, bx + 4, 8, pill(BW - 8, ly - 14, 0, 14, 0.14), 1);
     if (img) {
+        const gi = blank ? png.scale(img, Math.round(img.w * 1.3), Math.round(img.h * 1.3)) : img;   // a touch larger so the car's icon is fully covered
         const cx = bx + BW / 2 + ICON_DX + (dx | 0);
-        blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY + (dy | 0) - img.h / 2), tint(img, on ? rgb : DIM_SEG), 1);
+        blend(px, DW, Math.round(cx - gi.w / 2), Math.round(L.iconY + (dy | 0) - gi.h / 2), tint(gi, blank ? BAR_BG : on ? rgb : DIM_SEG), 1);
     }
     // The segment track is always drawn, in every state (grey off, coloured on, black-masked gaps) - the wheel's own
     // on / off indicator line too. To the LEFT of the first segment there is NO coloured connector: that zone is painted
@@ -576,22 +581,13 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlh
     // than squaring it off
     const maskH = L.lineH + 2 * MASK_PAD, maskSl = Math.round(SLANT * (maskH - 1) / (L.lineH - 1));
     if (maskR > connL) blend(px, DW, connL, ly - MASK_PAD, slantBar(maskR - connL, maskH, maskSl, BAR_BG), 1);  // opaque black, angled ends, hides the car's line
+    if (blank) return;                                   // a blank cover: the bar-colour icon + line mask only, no segments
     if (rext > 0) blend(px, DW, gbx + BW + SEG_GAP, ly, slantBar(rext, L.lineH, SLANT, lineCol), 1);  // coloured extension past the last segment
     const n = Math.max(1, max || 1), sw = (BW - (n - 1) * SEG_GAP) / n;
     for (let i = 0; i < n; i++) {
         const x0 = gbx + Math.round(i * (sw + SEG_GAP)), x1 = gbx + Math.round(i * (sw + SEG_GAP) + sw);
         blend(px, DW, x0, ly, slantBar(x1 - x0, L.lineH, SLANT, i < level ? rgb : DIM_SEG), 1);
     }
-}
-/* the "passenger heat on the left" blank: paints the bar's own colour over the car's heat icon and accent line at the
- * spot the relocated button left behind, so the OEM red is cancelled. The icon is covered with the heat GLYPH tinted the
- * bar colour (the same shape the button draws there), not a square, so only the glyph is hidden. Same surface as a button. */
-function drawBlank(px, L, img) {
-    const DW = drawW(L), BW = L.buttonW, bx = EXT_MAX, ly = L.lineY;
-    const maskH = L.lineH + 2 * MASK_PAD, maskSl = Math.round(SLANT * (maskH - 1) / (L.lineH - 1));
-    const connL = Math.max(0, bx - SEG_GAP - CONN), maskR = Math.min(DW, bx + BW + SEG_GAP);
-    blend(px, DW, connL, ly - MASK_PAD, slantBar(maskR - connL, maskH, maskSl, BAR_BG), 1);              // over the accent line (angled ends)
-    if (img) { const cx = bx + BW / 2 + ICON_DX; blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY - img.h / 2), tint(img, BAR_BG), 1); }   // the glyph, in the bar colour
 }
 
 /* ---- the service ---- */
@@ -649,24 +645,26 @@ function main() {
             frame();
         });
     }
-    // a left-zone icon: fitted to the icon height, any width (a wide logo stays wide); cached by file + mtime, apart from picture()'s box fit
-    function leftPic(file, cb) {
-        let key = file + ':h';
-        try { key += fs.statSync(file).mtime.getTime(); } catch (e) { return cb(null); }
+    // a placed-slot icon. box: fit inside a size x size box (the heat-spot shortcut, grid-icon sized); else fit to height
+    // `size`, width free (the wide M). Cached by file + fit + mtime, apart from picture()'s box fit
+    function leftPic(file, box, size, cb) {
+        let key = file + (box ? ':b' : ':h') + size;
+        try { key += ':' + fs.statSync(file).mtime.getTime(); } catch (e) { return cb(null); }
         if (pics[key] !== undefined) return cb(pics[key]);
         let buf; try { buf = fs.readFileSync(file); } catch (e) { return cb(null); }
-        png.decodeAsync(buf, (e, img) => { if (e) log(`icon ${file}: ${e.message}`); pics[key] = e ? null : png.fitH(img, L.left.ih); cb(pics[key]); });
+        png.decodeAsync(buf, (e, img) => { if (e) log(`icon ${file}: ${e.message}`); pics[key] = e ? null : box ? png.fit(img, size) : png.fitH(img, size); cb(pics[key]); });
     }
     function drawLeftSlot(i) {
         const slot = slots[i], name = slot && iconName(slot.icon), pid = LEFTPIX[i - GRID], MW = L.left.maxw;
-        if (!name) { leftW[i] = 0; return frame(); }                     // a left slot is shown only once it is given an icon
+        if (!name) { leftW[i] = 0; return frame(); }                     // a placed slot is shown only once it is given an icon
+        const isM = i === GRID;                                          // GRID = the wide M (height-fit, smaller); GRID+1 = the heat-spot shortcut (grid-icon sized)
         looks[i] = JSON.stringify({ builtin: 'lib/' + name });
-        leftPic(path.join(__dirname, 'icons', 'lib', name + '.png'), (img) => {
+        leftPic(path.join(__dirname, 'icons', 'lib', name + '.png'), !isM, isM ? L.left.mh : ICON_MAX, (img) => {
             const px = Buffer.alloc(MW * H * 4);
             if (img) {
                 const w = Math.min(img.w, MW), y = (H - img.h) >> 1;
                 const bg = flash[i] > Date.now() ? 0.4 : gestures.pressed() === i ? 0.18 : 0;
-                if (bg) blend(px, MW, 0, (H - L.left.ih - 16) >> 1, pill(w + 16, L.left.ih + 16, 10, 20, bg), 1);
+                if (bg) blend(px, MW, 0, (H - img.h - 16) >> 1, pill(w + 16, img.h + 16, 10, 20, bg), 1);
                 blend(px, MW, (w - img.w) >> 1, y, img, 1);
                 leftW[i] = w;
             } else leftW[i] = 0;
@@ -703,8 +701,9 @@ function main() {
     }
     function drawBlankKey() {                          // the bar-colour cover over the vacated heat spot (heatLeft)
         picture({ builtin: `hmi-heat-${spotSeat('passenger', settings.side)}` }, (img) => {   // the glyph the OEM draws at that spot
-            const DW = drawW(L), px = Buffer.alloc(DW * H * 4);
-            drawBlank(px, L, img);
+            const DW = drawW(L), px = Buffer.alloc(DW * H * 4), a = alignOf(settings, HEAT_MOVE_KEY);
+            // same machinery as a real button, so it lands exactly over the OEM icon - but painted the bar colour (blank)
+            drawButton(px, L, 'heat', img, 0, false, state(HEAT_MOVE_KEY).max, a.y, a.ix, a.ly, a.lx, a.lhx, true);
             gpu.pixels(BLANKPIX, [{ x: 0, y: 0, w: DW, h: H }], px);
             frame();
         }, HMI_PX);
