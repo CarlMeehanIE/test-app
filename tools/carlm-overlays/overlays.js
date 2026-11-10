@@ -584,13 +584,14 @@ function drawButton(px, L, kind, img, level, pressed, max, dy, dx, dly, dlx, dlh
     }
 }
 /* the "passenger heat on the left" blank: paints the bar's own colour over the car's heat icon and accent line at the
- * spot the relocated button left behind, so the OEM red is cancelled. Drawn into the same drawW surface as a button. */
-function drawBlank(px, L) {
-    const DW = drawW(L), BW = L.buttonW, bx = EXT_MAX, ly = L.lineY, ICON = 96;
+ * spot the relocated button left behind, so the OEM red is cancelled. The icon is covered with the heat GLYPH tinted the
+ * bar colour (the same shape the button draws there), not a square, so only the glyph is hidden. Same surface as a button. */
+function drawBlank(px, L, img) {
+    const DW = drawW(L), BW = L.buttonW, bx = EXT_MAX, ly = L.lineY;
     const maskH = L.lineH + 2 * MASK_PAD, maskSl = Math.round(SLANT * (maskH - 1) / (L.lineH - 1));
     const connL = Math.max(0, bx - SEG_GAP - CONN), maskR = Math.min(DW, bx + BW + SEG_GAP);
     blend(px, DW, connL, ly - MASK_PAD, slantBar(maskR - connL, maskH, maskSl, BAR_BG), 1);              // over the accent line (angled ends)
-    blend(px, DW, Math.round(bx + BW / 2 - ICON / 2), Math.round(L.iconY - ICON / 2), slantBar(ICON, ICON, 0, BAR_BG), 1);   // over the icon
+    if (img) { const cx = bx + BW / 2 + ICON_DX; blend(px, DW, Math.round(cx - img.w / 2), Math.round(L.iconY - img.h / 2), tint(img, BAR_BG), 1); }   // the glyph, in the bar colour
 }
 
 /* ---- the service ---- */
@@ -701,9 +702,12 @@ function main() {
         }, HMI_PX);
     }
     function drawBlankKey() {                          // the bar-colour cover over the vacated heat spot (heatLeft)
-        const DW = drawW(L), px = Buffer.alloc(DW * H * 4);
-        drawBlank(px, L);
-        gpu.pixels(BLANKPIX, [{ x: 0, y: 0, w: DW, h: H }], px);
+        picture({ builtin: `hmi-heat-${spotSeat('passenger', settings.side)}` }, (img) => {   // the glyph the OEM draws at that spot
+            const DW = drawW(L), px = Buffer.alloc(DW * H * 4);
+            drawBlank(px, L, img);
+            gpu.pixels(BLANKPIX, [{ x: 0, y: 0, w: DW, h: H }], px);
+            frame();
+        }, HMI_PX);
     }
     // "Show BMW's own" (the app's Align page): ours hidden PEEK_MS, the HMI's own buttons show and take the touches
     let peekUntil = 0, peekTimer = null;
