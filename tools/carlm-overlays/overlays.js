@@ -255,6 +255,12 @@ function target(slot, apps) {
     const a = apps.find((x) => x.id === slot.app);
     return a ? { state: slot.state, applet: a.appletId + slot.offset } : null;
 }
+/* an Android Auto slot holds two screens: the app's own screen (state/applet, used when a phone is connected) and the
+ * connect / setup screen (connect, used when none is). A tap opens whichever matches the live connection, like the OEM
+ * tile. state -1 (or no connect) means that screen is not taught yet -> ask for the hold that teaches it. */
+function aaTarget(slot, connected) {
+    return connected ? { state: slot.state, applet: slot.applet } : (slot.connect || { state: -1, applet: -1 });
+}
 /* a slot -> its picture: { builtin: name } or { file } (+ missing for an app that is gone) */
 function iconOf(slot, apps, live) {
     let own = iconName(slot.icon);
@@ -299,7 +305,9 @@ function describe(slot, apps) {
         return Object.assign({ kind: 'app', app: slot.app, title: i ? i.title : slot.app, missing: !a }, iconName(slot.icon) ? { own: slot.icon } : {});
     }
     const s = screenList().find((x) => x.state === slot.state && x.applet === slot.applet);
-    return Object.assign({ kind: 'bmw', title: s ? s.title : 'BMW screen', icon: s ? s.icon : 'Display' }, iconName(slot.icon) ? { own: slot.icon } : {});
+    const d = { kind: 'bmw', title: s ? s.title : 'BMW screen', icon: s ? s.icon : 'Display' };
+    if (slot.aa) { d.title = 'Android Auto'; d.icon = 'AndroidAuto'; d.aa = true; d.connect = !!slot.connect; }   // two-screen AA slot
+    return Object.assign(d, iconName(slot.icon) ? { own: slot.icon } : {});
 }
 /* settings from the app (or the file): only known keys of the right kind; the rest stays */
 function mergeSettings(cur, p) {
@@ -871,11 +879,12 @@ function main() {
 
     async function tap(i) {
         apps = installedApps(OAP);
-        const s = slots[i], t = target(s, apps);
+        const s = slots[i], t = s.aa && !s.app ? aaTarget(s, aaNow.connected) : target(s, apps);
         if (!t) { log(`slot ${i}: ${s.app} is not installed`); return; }
-        if (!s.app && t.state < 0) {                  // a screen not taught yet (Android Auto): ask for the hold
+        if (!s.app && t.state < 0) {                  // a screen not taught yet (Android Auto app or connect): ask for the hold
             failAt[i] = Date.now();
-            notice = { slot: i, title: describe(s, apps).title, at: failAt[i], learn: true };
+            const title = s.aa ? (aaNow.connected ? 'Android Auto' : 'Android Auto connection') : describe(s, apps).title;
+            notice = { slot: i, title, at: failAt[i], learn: true };
             drawSlot(i); setTimeout(() => drawSlot(i), 1550);
             push();
             return;
@@ -926,6 +935,18 @@ function main() {
         if (!mm) { log(`slot ${i}: no screen to save (${r})`); drawSlot(i); return; }
         apps = installedApps(OAP);
         const c = classify(+mm[1], +mm[2], apps), was = describe(slots[i], apps);
+        // an Android Auto slot: a hold within the learn window teaches whichever of its two screens matches the phone now
+        // - connected -> the app's own screen (opened when a phone is on); not connected -> the connect / setup screen
+        if (slots[i].aa && !c.app && Date.now() - failAt[i] < REPAIR_MS) {
+            const upd = Object.assign({}, slots[i]);
+            if (aaNow.connected) { upd.state = c.state; upd.applet = c.applet; learned['Android Auto'] = { state: c.state, applet: c.applet }; }
+            else upd.connect = { state: c.state, applet: c.applet };
+            log(`slot ${i}: Android Auto ${aaNow.connected ? 'app screen' : 'connect screen'} is ${c.state} ${c.applet} on this car`);
+            failAt[i] = 0;
+            if (notice && notice.slot === i) notice = null;
+            setSlot(i, upd);
+            return;
+        }
         // a hold soon after this slot's BMW screen did not open, on a screen we don't know: that screen's own ids here
         if (Date.now() - failAt[i] < REPAIR_MS && !slots[i].app && !c.app && was.title !== 'BMW screen' &&
             !screenList().some((x) => x.state === c.state && x.applet === c.applet) &&
@@ -979,7 +1000,7 @@ function main() {
         } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < SLOTS && slotOk(q.target)) {
             const t = q.target, sl = t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet };
             const scr = !t.app && screenList().find((x) => x.state === t.state && x.applet === t.applet);
-            if (scr && scr.title === 'Android Auto' && !iconName(slots[q.i].icon)) sl.icon = AA_LIVE;   // its live icon
+            if (scr && scr.title === 'Android Auto') { sl.aa = true; if (!iconName(slots[q.i].icon)) sl.icon = AA_LIVE; }   // two-screen AA slot + its live icon
             setSlot(q.i, sl);
             // a screen whose ids this car has not shown yet: ask for the hold that teaches them (the repair path)
             if (scr && scr.state < 0) {
@@ -1168,6 +1189,14 @@ function test() {
     assert.deepStrictEqual([iconOf(aaSlot, [], { aa: true }).builtin, iconOf(aaSlot, [], { aa: false }).builtin, iconOf({ state: 2, applet: 23, icon: AA_OFF }, [], { aa: true }).builtin],
         ['lib/android-auto-color', 'lib/android-auto', 'lib/android-auto']);
     assert.strictEqual(describe({ state: 2, applet: 23, icon: 'nope' }, []).own, undefined);
+    // two-screen Android Auto: a tap picks the app screen when a phone is on, else the connect screen (−1 = not taught yet)
+    const aaTwo = { aa: true, state: 500, applet: 7, connect: { state: 20, applet: 4 } };
+    assert.deepStrictEqual(aaTarget(aaTwo, true), { state: 500, applet: 7 }, 'connected: the app screen');
+    assert.deepStrictEqual(aaTarget(aaTwo, false), { state: 20, applet: 4 }, 'not connected: the connect screen');
+    assert.deepStrictEqual(aaTarget({ aa: true, state: 500, applet: 7 }, false), { state: -1, applet: -1 }, 'connect not taught: prompt the hold');
+    // describe keeps an AA slot an AA slot and reports whether its connect screen is set
+    assert.deepStrictEqual([describe(aaTwo, []).aa, describe(aaTwo, []).connect, describe(aaTwo, []).title], [true, true, 'Android Auto']);
+    assert.strictEqual(describe({ aa: true, state: 500, applet: 7 }, []).connect, false, 'no connect screen yet');
     ICON_LIB.forEach(([n]) => assert(fs.existsSync(path.join(__dirname, 'icons', 'lib', n + '.png')), `icons/lib/${n}.png`));
     // buttons: only what the car has and the settings allow, in the HMI's spots
     const keys = (st, set) => buttons(LAYOUT, st, set).map((b) => b.key + '@' + b.x).join(' ');
