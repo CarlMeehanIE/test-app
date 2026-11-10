@@ -61,9 +61,10 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // button, a tap at its right end reached the HMI). The RIGHT ones stay as measured (2nd video: moved 24 px too, the
     // HMI's line showed left of ours instead)
     buttons: { 'driver.wheel': 20, 'driver.cool': 246, 'driver.heat': 888, 'passenger.cool': 1844, 'passenger.heat': 2486 },
-    // the far-left empty zone (before the temperature control): extra shortcuts, drawn at the same icon height but any
-    // width (a wide logo stays wide), laid out left to right from x with gap between, however many are shown
-    left: { x: 40, ih: 76, gap: 28, maxw: 300 },
+    // the far-left empty zone (before the temperature control): extra shortcuts, drawn at the HMI's own icon height (so a
+    // wide logo like the M sits the same height as the music / home / grid glyphs), any width, laid out left to right
+    // from x with gap between, however many are shown
+    left: { x: 40, ih: 48, gap: 28, maxw: 300 },
     iconY: 55, lineY: 99, lineH: 6 };
 const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
 const LEFT = 2;                      // extra shortcuts in the far-left zone (indices GRID..GRID+LEFT-1), shown only when given an icon
