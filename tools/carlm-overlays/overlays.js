@@ -61,15 +61,15 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // button, a tap at its right end reached the HMI). The RIGHT ones stay as measured (2nd video: moved 24 px too, the
     // HMI's line showed left of ours instead)
     buttons: { 'driver.wheel': 20, 'driver.cool': 246, 'driver.heat': 888, 'passenger.cool': 1844, 'passenger.heat': 2486 },
-    // the far-left empty zone (before the temperature control): extra shortcuts, drawn at the HMI's own icon height (so a
-    // wide logo like the M sits the same height as the music / home / grid glyphs), any width, laid out left to right
-    // from x with gap between, however many are shown
-    left: { x: 40, ih: 40, gap: 28, maxw: 300 },
+    // the far-left empty zone (before the temperature control at x 365): one extra shortcut (the M), drawn at the HMI's
+    // own icon height (so it sits the same height as the music / home / grid glyphs), any width, and centred in the zone
+    // on cx (if ever more than one is shown, the whole row is centred on cx)
+    left: { cx: 182, ih: 40, gap: 28, maxw: 300 },
     iconY: 55, lineY: 99, lineH: 6 };
 const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
-const LEFT = 2;                      // extra shortcuts in the far-left zone (indices GRID..GRID+LEFT-1), shown only when given an icon
-const SLOTS = GRID + LEFT;           // 7 configurable shortcuts in all
-const LEFTPIX = [11, 12];            // the left slots' pixmaps (grid uses 1..GRID, buttons 6..10)
+const LEFT = 1;                      // one extra shortcut (the M) in the far-left zone (index GRID), shown only when given an icon
+const SLOTS = GRID + LEFT;           // 6 configurable shortcuts in all
+const LEFTPIX = [11];                // the left slot's pixmap (grid uses 1..GRID, buttons 6..10)
 // IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
 // against the accent line, so the icon sits centred over it
 const ICON_DX = 0;
@@ -140,8 +140,8 @@ const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}
 const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps', 'Home'];
 const defaults = () => {
     const by = (t) => { const s = screenList().find((x) => x.title === t); return { state: s.state, applet: s.applet }; };
-    // 5 grid slots, then the 2 left-zone slots: the first wears the M (so it shows), the second is hidden until given an icon
-    return DEFAULT_TITLES.map(by).concat([Object.assign(by('Home'), { icon: 'm-color' }), by('Home')]);
+    // 5 grid slots, then the one left-zone slot: it wears the M (so it shows)
+    return DEFAULT_TITLES.map(by).concat([Object.assign(by('Home'), { icon: 'm-color' })]);
 };
 const FAIL_MS = 800, REPAIR_MS = 10 * 60000;          // a tap's screen read again after; a hold that repairs it, within
 /* a tap that did nothing: the screen read before and after the open is the same, and is not the one asked for */
@@ -641,8 +641,13 @@ function main() {
     // the shown left slots, laid out left to right from the zone's x with a gap between (however many have an icon)
     function leftLayout() {
         if (!settings.shortcuts || peeking()) return [];
-        const out = []; let x = L.left.x;
-        for (let i = GRID; i < SLOTS; i++) { if (!leftW[i]) continue; out.push({ i, x, w: leftW[i] }); x += leftW[i] + L.left.gap; }
+        const shown = []; let total = 0;
+        for (let i = GRID; i < SLOTS; i++) { if (!leftW[i]) continue; shown.push(i); total += leftW[i]; }
+        if (!shown.length) return [];
+        total += (shown.length - 1) * L.left.gap;          // centre the row (one icon, normally) on cx in the empty zone
+        let x = Math.round(L.left.cx - total / 2);
+        const out = [];
+        for (const i of shown) { out.push({ i, x, w: leftW[i] }); x += leftW[i] + L.left.gap; }
         return out;
     }
     const state = (key) => {                          // 'driver.heat' -> its { have, level, max }; 'driver.wheel' too
@@ -1229,10 +1234,10 @@ function test() {
     assert.deepStrictEqual(iconOf({ state: 7, applet: 91 }, []), { builtin: 'nav' });
     assert.deepStrictEqual(defaults()[1], { state: 7, applet: 91 });
     learned = {};
-    // 5 grid slots, then the 2 left-zone slots: the first wears the M (so it shows), the second is hidden until given an icon
+    // 5 grid slots, then the one left-zone slot: it wears the M (so it shows)
     assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }, { state: 20000, applet: 4 },
-        { state: 20000, applet: 4, icon: 'm-color' }, { state: 20000, applet: 4 }]);
-    assert.strictEqual(defaults().length, SLOTS, 'seven default slots');
+        { state: 20000, applet: 4, icon: 'm-color' }]);
+    assert.strictEqual(defaults().length, SLOTS, 'six default slots');
     assert.deepStrictEqual(mergeSettings(SETTINGS, { shift: { on: false, flash: 7000 } }).shift, { on: false, auto: true, start: 4500, flash: 7000, hud: true });
     assert.strictEqual(SETTINGS.order, 'up', 'defaults untouched');
     // taps: up 1 -> 2 -> 3 -> off, down 3 -> 2 -> 1 -> off
