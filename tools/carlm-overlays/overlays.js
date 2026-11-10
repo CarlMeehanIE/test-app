@@ -64,7 +64,7 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // the far-left empty zone (before the temperature control at x 365): one extra shortcut (the M), drawn at the HMI's
     // own icon height (so it sits the same height as the music / home / grid glyphs), any width, and centred in the zone
     // on cx (if ever more than one is shown, the whole row is centred on cx)
-    left: { cx: 182, ih: 40, gap: 28, maxw: 300 },
+    left: { cx: 182, ih: 27, gap: 28, maxw: 300 },   // ih: the M's height (fit), ~1/3 smaller than the old 40
     iconY: 55, lineY: 99, lineH: 6 };
 const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
 const LEFT = 1;                      // one extra shortcut (the M) in the far-left zone (index GRID), shown only when given an icon
