@@ -70,9 +70,11 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     heatLeftX: 245,
     iconY: 55, lineY: 99, lineH: 6 };
 const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
-const LEFT = 1;                      // one extra shortcut (the M) in the far-left zone (index GRID), shown only when given an icon
-const SLOTS = GRID + LEFT;           // 6 configurable shortcuts in all
-const LEFTPIX = [11];                // the left slot's pixmap (grid uses 1..GRID, buttons 6..10)
+// two placed shortcuts (shown only when given an icon): GRID the M in the far-left zone, GRID+1 over the heat spot freed
+// by "passenger heat on the left" (only while heatLeft is on)
+const LEFT = 2;
+const SLOTS = GRID + LEFT;           // 7 configurable shortcuts in all
+const LEFTPIX = [11, 12];            // the placed slots' pixmaps (grid uses 1..GRID, buttons 6..10, the blank mask 13)
 // IterioDev measured the HMI's own icons 24 px right of the button's centre; on this car (2026-11-08) they read off-centre
 // against the accent line, so the icon sits centred over it
 const ICON_DX = 0;
@@ -143,8 +145,8 @@ const screenList = () => SCREENS.map((s) => (learned[s.title] ? Object.assign({}
 const DEFAULT_TITLES = ['Media', 'Navigation', 'Phone', 'All apps', 'Home'];
 const defaults = () => {
     const by = (t) => { const s = screenList().find((x) => x.title === t); return { state: s.state, applet: s.applet }; };
-    // 5 grid slots, then the one left-zone slot: it wears the M (so it shows)
-    return DEFAULT_TITLES.map(by).concat([Object.assign(by('Home'), { icon: 'm-color' })]);
+    // 5 grid slots, then the M (far-left, wears the M icon so it shows), then the heat-spot slot (empty: hidden until given an icon)
+    return DEFAULT_TITLES.map(by).concat([Object.assign(by('Home'), { icon: 'm-color' }), by('Home')]);
 };
 const FAIL_MS = 800, REPAIR_MS = 10 * 60000;          // a tap's screen read again after; a hold that repairs it, within
 /* a tap that did nothing: the screen read before and after the open is the same, and is not the one asked for */
@@ -613,7 +615,7 @@ function main() {
     const pending = {};                               // pending['driver.heat'] = { level, until }
     const gpu = new RenderClient('carlm-overlays', { info: log, warn: log, error: log });
     const PIX = { 'driver.wheel': 6, 'driver.cool': 7, 'driver.heat': 8, 'passenger.cool': 9, 'passenger.heat': 10 };
-    const BLANKPIX = 12;                              // the "passenger heat on the left" blank over the vacated spot
+    const BLANKPIX = 13;                              // the "passenger heat on the left" blank over the vacated spot
     const blankNow = () => (peeking() ? null : blankSpot(L, st, settings));
 
     function picture(ic, cb, max) {                   // a decoded, fitted picture; cached by file + mtime
@@ -676,13 +678,10 @@ function main() {
     // the shown left slots, laid out left to right from the zone's x with a gap between (however many have an icon)
     function leftLayout() {
         if (!settings.shortcuts || peeking()) return [];
-        const shown = []; let total = 0;
-        for (let i = GRID; i < SLOTS; i++) { if (!leftW[i]) continue; shown.push(i); total += leftW[i]; }
-        if (!shown.length) return [];
-        total += (shown.length - 1) * L.left.gap;          // centre the row (one icon, normally) on cx in the empty zone
-        let x = Math.round(L.left.cx - total / 2);
         const out = [];
-        for (const i of shown) { out.push({ i, x, w: leftW[i] }); x += leftW[i] + L.left.gap; }
+        if (leftW[GRID]) out.push({ i: GRID, x: Math.round(L.left.cx - leftW[GRID] / 2), w: leftW[GRID] });   // the M, centred in the far-left zone
+        const bm = blankSpot(L, st, settings);             // the heat spot freed by heatLeft: a shortcut, centred in that button cell, over the mask
+        if (bm && leftW[GRID + 1]) out.push({ i: GRID + 1, x: Math.round(bm.x + (L.buttonW - leftW[GRID + 1]) / 2), w: leftW[GRID + 1] });
         return out;
     }
     const state = (key) => {                          // 'driver.heat' -> its { have, level, max }; 'driver.wheel' too
@@ -716,12 +715,12 @@ function main() {
     const draw = (k) => (typeof k === 'number' ? (k >= 0 ? drawSlot(k) : null) : drawButtonKey(k));
     function frame() {
         const ops = shownSlots().map((x, i) => imageOp(i + 1, x, 0, SW, H, 0));
+        for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
+        const bm = blankNow();
+        if (bm) ops.push(imageOp(BLANKPIX, bm.x - EXT_MAX, 0, drawW(L), H, 0));   // the blank mask, under any heat-spot shortcut
         // the pixmap is maxw wide: draw it at that width (1:1, no scaling) so a narrow icon isn't squished; the claim
         // (claims()) stays the icon's own width l.w, so only that part takes touches and the rest shows the HMI through
         for (const l of leftLayout()) ops.push(imageOp(LEFTPIX[l.i - GRID], l.x, 0, L.left.maxw, H, 0));
-        for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
-        const bm = blankNow();
-        if (bm) ops.push(imageOp(BLANKPIX, bm.x - EXT_MAX, 0, drawW(L), H, 0));
         const all = new Uint32Array(ops.reduce((n, o) => n + o.length, 0));
         ops.reduce((at, o) => { all.set(o, at); return at + o.length; }, 0);
         gpu.frameWords(all);
@@ -1123,6 +1122,7 @@ function main() {
     L.slots.forEach((x, i) => gpu.pixmap(i + 1, SW, H, 'rgba', 'linear'));
     LEFTPIX.forEach((p) => gpu.pixmap(p, L.left.maxw, H, 'rgba', 'linear'));
     Object.keys(PIX).forEach((k) => gpu.pixmap(PIX[k], drawW(L), H, 'rgba', 'linear'));
+    gpu.pixmap(BLANKPIX, drawW(L), H, 'rgba', 'linear');   // the heatLeft blank mask (same surface as a button)
     /* boot (BOOT): hidden, claiming nothing, until AFTER_MS after the start with the HMI up; armed again after a sleep */
     function arm(why, since, wake) {
         Object.assign(boot, { since, hmiAt: 0, up: false, wake: !!wake });
@@ -1310,10 +1310,10 @@ function test() {
     assert.deepStrictEqual(iconOf({ state: 7, applet: 91 }, []), { builtin: 'nav' });
     assert.deepStrictEqual(defaults()[1], { state: 7, applet: 91 });
     learned = {};
-    // 5 grid slots, then the one left-zone slot: it wears the M (so it shows)
+    // 5 grid slots, then the M (shown), then the heat-spot slot (empty: hidden until given an icon)
     assert.deepStrictEqual(defaults(), [{ state: 2, applet: 23 }, { state: 1, applet: 32 }, { state: 24, applet: 34 }, { state: 20, applet: 4 }, { state: 20000, applet: 4 },
-        { state: 20000, applet: 4, icon: 'm-color' }]);
-    assert.strictEqual(defaults().length, SLOTS, 'six default slots');
+        { state: 20000, applet: 4, icon: 'm-color' }, { state: 20000, applet: 4 }]);
+    assert.strictEqual(defaults().length, SLOTS, 'seven default slots');
     assert.deepStrictEqual(mergeSettings(SETTINGS, { shift: { on: false, flash: 7000 } }).shift, { on: false, auto: true, start: 4500, flash: 7000, hud: true });
     assert.strictEqual(SETTINGS.order, 'up', 'defaults untouched');
     // taps: up 1 -> 2 -> 3 -> off, down 3 -> 2 -> 1 -> off
