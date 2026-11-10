@@ -173,7 +173,8 @@ const SIDES = ['left', 'right'];                     // where the steering wheel
 // px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
 // y its icon up / down; kept within these
 // lhx: moves the accent line (connector + segments) left / right as a block, apart from the icon; lx lengthens it
-const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24, lx: 240, lhx: 120 }, AXES = ['x', 'ix', 'y', 'ly', 'lx', 'lhx'];
+// 'blank': the "passenger heat on the left" cover over the vacated OEM icon, nudged like a button so it lines up with it
+const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS, ['blank']), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24, lx: 240, lhx: 120 }, AXES = ['x', 'ix', 'y', 'ly', 'lx', 'lhx'];
 const clampAlign = (v, axis) => Math.max(-ALIGN_MAX[axis], Math.min(ALIGN_MAX[axis], v));
 /* a button's total offset: its own plus 'all' */
 const alignOf = (set, key) => {
@@ -184,7 +185,7 @@ const alignOf = (set, key) => {
 };
 // the measured per-button defaults (Carl's car, right-hand drive): a fresh install / Values starts aligned
 const ALIGN_DEFAULTS = { 'driver.heat': { x: 36, y: -1 }, 'passenger.heat': { x: 12, y: -1, ly: 1 }, 'driver.wheel': { x: -40 } };
-const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, heatLeft: false, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
+const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, heatLeft: false, blankTop: false, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
@@ -319,7 +320,7 @@ function describe(slot, apps) {
 function mergeSettings(cur, p) {
     const out = JSON.parse(JSON.stringify(cur));
     if (!p || typeof p !== 'object') return out;
-    ['shortcuts', 'seats', 'wheel', 'ambient', 'heatLeft'].forEach((k) => { if (typeof p[k] === 'boolean') out[k] = p[k]; });
+    ['shortcuts', 'seats', 'wheel', 'ambient', 'heatLeft', 'blankTop'].forEach((k) => { if (typeof p[k] === 'boolean') out[k] = p[k]; });
     ['ambientHeat', 'ambientCool'].forEach((k) => { if (Number.isInteger(p[k]) && p[k] >= 1 && p[k] <= 12) out[k] = p[k]; });
     if (p.order === 'up' || p.order === 'down') out.order = p.order;
     if (SIDES.indexOf(p.side) >= 0) out.side = p.side;
@@ -433,7 +434,7 @@ const HEAT_MOVE_KEY = 'passenger.heat';
  * car still draws the OEM icon) - the blank cover goes here, drawn with the button's own machinery so it lands over it */
 function blankSpot(L, st, set) {
     if (!set.heatLeft) return null;
-    return buttons(L, st, set).some((b) => b.key === HEAT_MOVE_KEY) ? { x: spot(L, HEAT_MOVE_KEY, set.side) + alignOf(set, HEAT_MOVE_KEY).x } : null;
+    return buttons(L, st, set).some((b) => b.key === HEAT_MOVE_KEY) ? { x: spot(L, HEAT_MOVE_KEY, set.side) + alignOf(set, 'blank').x } : null;
 }
 /* the seat / wheel buttons to show, [{ key, x }]: per button the user's choice ('on' / 'off'), on 'auto' what the car has;
  * the old master switches (seats, wheel) still hide theirs */
@@ -701,8 +702,9 @@ function main() {
     }
     function drawBlankKey() {                          // the bar-colour cover over the vacated heat spot (heatLeft)
         picture({ builtin: `hmi-heat-${spotSeat('passenger', settings.side)}` }, (img) => {   // the glyph the OEM draws at that spot
-            const DW = drawW(L), px = Buffer.alloc(DW * H * 4), a = alignOf(settings, HEAT_MOVE_KEY);
-            // same machinery as a real button, so it lands exactly over the OEM icon - but painted the bar colour (blank)
+            const DW = drawW(L), px = Buffer.alloc(DW * H * 4), a = alignOf(settings, 'blank');
+            // same machinery as a real button, so it lands over the OEM icon - but painted the bar colour (blank); its own
+            // align key, so the Align page's "Heat cover" nudges it onto the OEM icon
             drawButton(px, L, 'heat', img, 0, false, state(HEAT_MOVE_KEY).max, a.y, a.ix, a.ly, a.lx, a.lhx, true);
             gpu.pixels(BLANKPIX, [{ x: 0, y: 0, w: DW, h: H }], px);
             frame();
@@ -717,11 +719,12 @@ function main() {
     function frame() {
         const ops = shownSlots().map((x, i) => imageOp(i + 1, x, 0, SW, H, 0));
         for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
-        const bm = blankNow();
-        if (bm) ops.push(imageOp(BLANKPIX, bm.x - EXT_MAX, 0, drawW(L), H, 0));   // the blank mask, under any heat-spot shortcut
+        const bm = blankNow(), blankOp = bm && imageOp(BLANKPIX, bm.x - EXT_MAX, 0, drawW(L), H, 0);
+        if (blankOp && !settings.blankTop) ops.push(blankOp);   // default: the cover sits under the heat-spot shortcut
         // the pixmap is maxw wide: draw it at that width (1:1, no scaling) so a narrow icon isn't squished; the claim
         // (claims()) stays the icon's own width l.w, so only that part takes touches and the rest shows the HMI through
         for (const l of leftLayout()) ops.push(imageOp(LEFTPIX[l.i - GRID], l.x, 0, L.left.maxw, H, 0));
+        if (blankOp && settings.blankTop) ops.push(blankOp);    // "cover on top": over the shortcut
         const all = new Uint32Array(ops.reduce((n, o) => n + o.length, 0));
         ops.reduce((at, o) => { all.set(o, at); return at + o.length; }, 0);
         gpu.frameWords(all);
@@ -1258,6 +1261,8 @@ function test() {
     assert.strictEqual(keys(heatOnly, hlR), 'driver.heat@2486 passenger.heat@190', 'RHD: the passenger (left) heat moves, the driver (right) stays put');
     assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hlR), { x: 888 }, 'RHD: the passenger spot (888) is blanked, not the driver');
     assert.strictEqual(blankSpot(LAYOUT, heatOnly, S0), null, 'off by default');
+    const hlB = mergeSettings(S0, { heatLeft: true, side: 'right', align: { blank: { x: -25 } } });
+    assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hlB), { x: 863 }, 'the cover follows its own align key');
     assert.strictEqual(keys(all, mergeSettings(S0, { seats: false })), 'driver.wheel@20');
     assert.strictEqual(keys(all, mergeSettings(S0, { wheel: false, seats: 'no' })), 'driver.cool@246 driver.heat@888 passenger.cool@1844 passenger.heat@2486');
     // a right-hand drive car: the driver's buttons in the right-hand spots, the passenger's left, the wheel at the far right
@@ -1285,7 +1290,7 @@ function test() {
     // settings: known keys of the right kind only
     const s2 = mergeSettings(SETTINGS, { order: 'down', mmode: { m2: 'track', off: 'warp', on: false, boot: 1 }, extra: 1, shortcuts: 0,
         ambientHeat: 4, ambientCool: 13 });
-    assert.deepStrictEqual(s2, { shortcuts: true, seats: true, wheel: true, ambient: true, heatLeft: false, ambientHeat: 4, ambientCool: 9, order: 'down', side: 'left',
+    assert.deepStrictEqual(s2, { shortcuts: true, seats: true, wheel: true, ambient: true, heatLeft: false, blankTop: false, ambientHeat: 4, ambientCool: 9, order: 'down', side: 'left',
         show: SETTINGS.show, align: SETTINGS.align, mmode: { on: false, m1: 'sport', m2: 'track', off: 'road', start: 'car', car: 'auto' },
         shift: shift.DEFAULTS });
     // per-button choice: 'on' shows what the car doesn't report, 'off' hides what it does (an M2 without ventilation that
