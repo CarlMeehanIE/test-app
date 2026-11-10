@@ -64,10 +64,11 @@ const LAYOUT = { x: 0, y: 840, w: 2880, h: 120, slots: [1055, 1200, 1540, 1685, 
     // the far-left empty zone (before the temperature control at x 365): one extra shortcut (the M), drawn at the HMI's
     // own icon height (so it sits the same height as the music / home / grid glyphs), any width, and centred in the zone
     // on cx (if ever more than one is shown, the whole row is centred on cx)
-    left: { cx: 182, ih: 40, gap: 28, maxw: 300 },
-    // the "passenger heat on the left" option (settings.heatLeft): the far-right heat button is redrawn here instead (left
-    // of the temperature control, beside the M), and its old spot is blanked with a bar-colour mask; nudge on the Align page
-    heatLeftX: 245,
+    left: { cx: 115, ih: 40, gap: 28, maxw: 300 },
+    // the "passenger heat on the left" option (settings.heatLeft): the passenger heat button is redrawn here instead, left
+    // of the temperature control (a gap before it, so its grey line doesn't clash with the temp's blue) and beside the M;
+    // nudge on the Align page
+    heatLeftX: 190,
     iconY: 55, lineY: 99, lineH: 6 };
 const GRID = LAYOUT.slots.length;    // 5 fixed grid shortcuts: four around CLIMATE MENU, a fifth at the free cooled-seat spot
 // two placed shortcuts (shown only when given an icon): GRID the M in the far-left zone, GRID+1 over the heat spot freed
@@ -425,24 +426,21 @@ function spot(L, key, side) {
     if (kind === 'wheel') return side === 'right' ? L.w - L.buttons[key] - L.buttonW : L.buttons[key];
     return L.buttons[`${spotSeat(seat, side)}.${kind}`];
 }
-/* the heat button sitting at the far right (largest x) for the current drive side: the one "passenger heat on the left"
- * (set.heatLeft) relocates. By position, so it is right whether the side swap put driver or passenger heat there. */
-function rightHeatKey(L, set) {
-    return spot(L, 'driver.heat', set.side) >= spot(L, 'passenger.heat', set.side) ? 'driver.heat' : 'passenger.heat';
-}
-/* when heatLeft is on and that heat button is shown, the spot it left behind (to blank with a bar-colour mask), else null */
+// "passenger heat on the left" (set.heatLeft) relocates the PASSENGER's seat-heat button (whichever side spot the drive
+// side puts it in); the driver's stays put. The side swap means this is the left button on a right-hand-drive car.
+const HEAT_MOVE_KEY = 'passenger.heat';
+/* when heatLeft is on and the passenger heat button is shown, the spot it left behind (to blank with a bar-colour mask) */
 function blankSpot(L, st, set) {
     if (!set.heatLeft) return null;
-    const key = rightHeatKey(L, set);
-    return buttons(L, st, set).some((b) => b.key === key) ? { x: spot(L, key, set.side) } : null;
+    return buttons(L, st, set).some((b) => b.key === HEAT_MOVE_KEY) ? { x: spot(L, HEAT_MOVE_KEY, set.side) } : null;
 }
 /* the seat / wheel buttons to show, [{ key, x }]: per button the user's choice ('on' / 'off'), on 'auto' what the car has;
  * the old master switches (seats, wheel) still hide theirs */
 function buttons(L, st, set) {
     const want = (key, have) => (set.show[key] === 'on' || (set.show[key] !== 'off' && have));
-    const rightHeat = set.heatLeft ? rightHeatKey(L, set) : null;
-    // the far-right heat button is redrawn at heatLeftX (beside the M) when heatLeft is on; everything else in its own spot
-    const at = (key) => Math.max(0, Math.min(L.w - L.buttonW, (key === rightHeat ? L.heatLeftX : spot(L, key, set.side)) + alignOf(set, key).x));
+    const movedHeat = set.heatLeft ? HEAT_MOVE_KEY : null;
+    // the passenger heat button is redrawn at heatLeftX (beside the M) when heatLeft is on; everything else in its own spot
+    const at = (key) => Math.max(0, Math.min(L.w - L.buttonW, (key === movedHeat ? L.heatLeftX : spot(L, key, set.side)) + alignOf(set, key).x));
     const out = [];
     if (set.wheel && want('driver.wheel', st.wheel.have)) out.push({ key: 'driver.wheel', x: at('driver.wheel') });
     if (set.seats) {
@@ -1251,11 +1249,11 @@ function test() {
     // "passenger heat on the left": the far-right heat button (here passenger.heat@2486) is redrawn at heatLeftX; its
     // old spot is reported for the blank mask. By position, so right-hand drive (driver.heat@2486) relocates the same way.
     const hl = mergeSettings(S0, { heatLeft: true });
-    assert.strictEqual(keys(heatOnly, hl), 'driver.heat@888 passenger.heat@245', 'passenger heat moved left');
-    assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hl), { x: 2486 }, 'its old spot is blanked');
+    assert.strictEqual(keys(heatOnly, hl), 'driver.heat@888 passenger.heat@190', 'the passenger heat moves left, the driver stays');
+    assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hl), { x: 2486 }, 'LHD: its old spot (2486) is blanked');
     const hlR = mergeSettings(S0, { heatLeft: true, side: 'right' });
-    assert.strictEqual(keys(heatOnly, hlR), 'driver.heat@245 passenger.heat@888', 'RHD: the far-right (driver) heat moves left');
-    assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hlR), { x: 2486 });
+    assert.strictEqual(keys(heatOnly, hlR), 'driver.heat@2486 passenger.heat@190', 'RHD: the passenger (left) heat moves, the driver (right) stays put');
+    assert.deepStrictEqual(blankSpot(LAYOUT, heatOnly, hlR), { x: 888 }, 'RHD: the passenger spot (888) is blanked, not the driver');
     assert.strictEqual(blankSpot(LAYOUT, heatOnly, S0), null, 'off by default');
     assert.strictEqual(keys(all, mergeSettings(S0, { seats: false })), 'driver.wheel@20');
     assert.strictEqual(keys(all, mergeSettings(S0, { wheel: false, seats: 'no' })), 'driver.cool@246 driver.heat@888 passenger.cool@1844 passenger.heat@2486');
