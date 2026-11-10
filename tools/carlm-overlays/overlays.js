@@ -671,7 +671,9 @@ function main() {
     const draw = (k) => (typeof k === 'number' ? (k >= 0 ? drawSlot(k) : null) : drawButtonKey(k));
     function frame() {
         const ops = shownSlots().map((x, i) => imageOp(i + 1, x, 0, SW, H, 0));
-        for (const l of leftLayout()) ops.push(imageOp(LEFTPIX[l.i - GRID], l.x, 0, l.w, H, 0));
+        // the pixmap is maxw wide: draw it at that width (1:1, no scaling) so a narrow icon isn't squished; the claim
+        // (claims()) stays the icon's own width l.w, so only that part takes touches and the rest shows the HMI through
+        for (const l of leftLayout()) ops.push(imageOp(LEFTPIX[l.i - GRID], l.x, 0, L.left.maxw, H, 0));
         for (const b of shownButtons()) ops.push(imageOp(PIX[b.key], b.x - EXT_MAX, 0, drawW(L), H, 0));
         const all = new Uint32Array(ops.reduce((n, o) => n + o.length, 0));
         ops.reduce((at, o) => { all.set(o, at); return at + o.length; }, 0);

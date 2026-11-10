@@ -1,6 +1,6 @@
 {
  "id": "carlm_overlays",
- "version": "1.29.0",
+ "version": "1.30.0",
  "title": "eOverlays",
  "description": "Set up the Overlays strip in the climate bar: what each of the shortcuts opens (BMW screens or apps) and its icon in the bar (Android Auto, Spotify, Waze and 36 more), the seat heating / ventilation and steering wheel buttons, nudging each of them into place (Align), the tap order, shift lights on the instrument cluster for cars without their own, not M cars (needs Cluster renderer from robertnisipeanu/idrive-apps), and on M cars which M Mode M1 / M2 switch to and which one a start begins in. Needs the Overlays tool from the same source (carlm-overlays; uninstall IterioDev's Overlays app and tool first).",
  "mguHmi": [
@@ -10,7 +10,7 @@
   "renderer"
  ],
  "requires": {
-  "carlm-overlays": "0.24.0",
+  "carlm-overlays": "0.25.0",
   "mgu-deploy": "0.7.5"
  }
 }
