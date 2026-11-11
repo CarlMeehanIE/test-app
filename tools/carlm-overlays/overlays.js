@@ -167,11 +167,12 @@ const SIDES = ['left', 'right'];                     // where the steering wheel
 // px per button key and 'all' (added to each): x the whole button (icon, line, touch), ix its icon alone left / right,
 // y its icon up / down; kept within these
 // lhx: moves the accent line (connector + segments) left / right as a block, apart from the icon; lx lengthens it
-const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24, lx: 240, lhx: 120 }, AXES = ['x', 'ix', 'y', 'ly', 'lx', 'lhx'];
+// 'm': the far-left M logo, nudged (x/y) and resized (sz) from the Align page. sz is the only size axis - it adjusts the M's fit height.
+const ALIGN_KEYS = ['all'].concat(BUTTON_KEYS, ['m']), ALIGN_MAX = { x: 120, ix: 40, y: 20, ly: 24, lx: 240, lhx: 120, sz: 30 }, AXES = ['x', 'ix', 'y', 'ly', 'lx', 'lhx', 'sz'];
 const clampAlign = (v, axis) => Math.max(-ALIGN_MAX[axis], Math.min(ALIGN_MAX[axis], v));
-/* a button's total offset: its own plus 'all' */
+/* a button's total offset: its own plus 'all' (the M logo stands on its own, not moved by 'all') */
 const alignOf = (set, key) => {
-    const a = (set && set.align) || {}, all = a.all || {}, own = a[key] || {};
+    const a = (set && set.align) || {}, all = key === 'm' ? {} : (a.all || {}), own = a[key] || {};
     const out = {};
     AXES.forEach((k) => { out[k] = clampAlign((all[k] | 0) + (own[k] | 0), k); });
     return out;
@@ -180,7 +181,7 @@ const alignOf = (set, key) => {
 const ALIGN_DEFAULTS = { 'driver.heat': { x: 36, y: -1 }, 'passenger.heat': { x: 12, y: -1, ly: 1 }, 'driver.wheel': { x: -40 } };
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
-    align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
+    align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
@@ -621,24 +622,25 @@ function main() {
             frame();
         });
     }
-    // a left-zone icon: fitted to the icon height, any width (a wide logo stays wide); cached by file + mtime, apart from picture()'s box fit
-    function leftPic(file, cb) {
-        let key = file + ':h';
-        try { key += fs.statSync(file).mtime.getTime(); } catch (e) { return cb(null); }
+    // a left-zone icon: fitted to `size` px tall, any width (a wide logo stays wide); cached by file + size + mtime
+    function leftPic(file, size, cb) {
+        let key = file + ':h' + size;
+        try { key += ':' + fs.statSync(file).mtime.getTime(); } catch (e) { return cb(null); }
         if (pics[key] !== undefined) return cb(pics[key]);
         let buf; try { buf = fs.readFileSync(file); } catch (e) { return cb(null); }
-        png.decodeAsync(buf, (e, img) => { if (e) log(`icon ${file}: ${e.message}`); pics[key] = e ? null : png.fitH(img, L.left.ih); cb(pics[key]); });
+        png.decodeAsync(buf, (e, img) => { if (e) log(`icon ${file}: ${e.message}`); pics[key] = e ? null : png.fitH(img, size); cb(pics[key]); });
     }
     function drawLeftSlot(i) {
         const slot = slots[i], name = slot && iconName(slot.icon), pid = LEFTPIX[i - GRID], MW = L.left.maxw;
         if (!name) { leftW[i] = 0; return frame(); }                     // a left slot is shown only once it is given an icon
-        looks[i] = JSON.stringify({ builtin: 'lib/' + name });
-        leftPic(path.join(__dirname, 'icons', 'lib', name + '.png'), (img) => {
+        const a = alignOf(settings, 'm'), size = Math.max(10, L.left.ih + a.sz);   // the M's size (sz) and vertical nudge (y) from the Align page
+        looks[i] = JSON.stringify({ builtin: 'lib/' + name, size, y: a.y });
+        leftPic(path.join(__dirname, 'icons', 'lib', name + '.png'), size, (img) => {
             const px = Buffer.alloc(MW * H * 4);
             if (img) {
-                const w = Math.min(img.w, MW), y = (H - img.h) >> 1;
+                const w = Math.min(img.w, MW), y = ((H - img.h) >> 1) + a.y;
                 const bg = flash[i] > Date.now() ? 0.4 : gestures.pressed() === i ? 0.18 : 0;
-                if (bg) blend(px, MW, 0, (H - L.left.ih - 16) >> 1, pill(w + 16, L.left.ih + 16, 10, 20, bg), 1);
+                if (bg) blend(px, MW, 0, ((H - img.h - 16) >> 1) + a.y, pill(w + 16, img.h + 16, 10, 20, bg), 1);
                 blend(px, MW, (w - img.w) >> 1, y, img, 1);
                 leftW[i] = w;
             } else leftW[i] = 0;
@@ -652,8 +654,8 @@ function main() {
         const shown = []; let total = 0;
         for (let i = GRID; i < SLOTS; i++) { if (!leftW[i]) continue; shown.push(i); total += leftW[i]; }
         if (!shown.length) return [];
-        total += (shown.length - 1) * L.left.gap;          // centre the row (one icon, normally) on cx in the empty zone
-        let x = Math.round(L.left.cx - total / 2);
+        total += (shown.length - 1) * L.left.gap;          // centre the row (the M) on cx, plus its horizontal Align nudge
+        let x = Math.round(L.left.cx + alignOf(settings, 'm').x - total / 2);
         const out = [];
         for (const i of shown) { out.push({ i, x, w: leftW[i] }); x += leftW[i] + L.left.gap; }
         return out;
@@ -1202,10 +1204,10 @@ function test() {
     const keys = (st, set) => buttons(LAYOUT, st, set).map((b) => b.key + '@' + b.x).join(' ');
     const all = seats.state(true);
     // a zeroed-align baseline, so the position tests don't move with the baked-in per-button defaults
-    const Z = ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }; return o; }, {}), S0 = mergeSettings(SETTINGS, { align: Z });
+    const Z = ALIGN_KEYS.reduce((o, k) => { o[k] = { x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }; return o; }, {}), S0 = mergeSettings(SETTINGS, { align: Z });
     // the baked-in defaults (Carl's measured offsets) are there on a fresh install
     assert.deepStrictEqual([mergeSettings(SETTINGS, {}).align['driver.heat'], mergeSettings(SETTINGS, {}).align['passenger.heat'], mergeSettings(SETTINGS, {}).align['driver.wheel']],
-        [{ x: 36, ix: 0, y: -1, ly: 0, lx: 0, lhx: 0 }, { x: 12, ix: 0, y: -1, ly: 1, lx: 0, lhx: 0 }, { x: -40, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }], 'baked-in defaults');
+        [{ x: 36, ix: 0, y: -1, ly: 0, lx: 0, lhx: 0, sz: 0 }, { x: 12, ix: 0, y: -1, ly: 1, lx: 0, lhx: 0, sz: 0 }, { x: -40, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }], 'baked-in defaults');
     assert.strictEqual(keys(all, S0), 'driver.wheel@20 driver.cool@246 driver.heat@888 passenger.cool@1844 passenger.heat@2486');
     const heatOnly = seats.state(false);
     heatOnly.seats.driver.heat.have = heatOnly.seats.passenger.heat.have = true;
@@ -1219,12 +1221,16 @@ function test() {
     assert.strictEqual(mergeSettings(rhd, { side: 'middle' }).side, 'right', 'a bad side: kept');
     // alignment: per button plus 'all', x moves the button (kept on the bar), clamped; partial updates keep the other axis
     const al = mergeSettings(S0, { align: { 'driver.heat': { x: 7, y: -3 }, all: { x: -2 }, 'passenger.cool': { x: 999, y: 'no' }, bogus: { x: 1 } } });
-    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3, ly: 0, lx: 0, lhx: 0 }, { x: -2, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }, { x: 120, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }, undefined]);
-    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3, ly: 0, lx: 0, lhx: 0 });
+    assert.deepStrictEqual([al.align['driver.heat'], al.align.all, al.align['passenger.cool'], al.align.bogus], [{ x: 7, ix: 0, y: -3, ly: 0, lx: 0, lhx: 0, sz: 0 }, { x: -2, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, { x: 120, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, undefined]);
+    assert.deepStrictEqual(alignOf(al, 'driver.heat'), { x: 5, ix: 0, y: -3, ly: 0, lx: 0, lhx: 0, sz: 0 });
     assert.strictEqual(keys(heatOnly, al), 'driver.heat@893 passenger.heat@2484');
-    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4, ly: 0, lx: 0, lhx: 0 });
+    assert.deepStrictEqual(mergeSettings(al, { align: { 'driver.heat': { y: 4 } } }).align['driver.heat'], { x: 7, ix: 0, y: 4, ly: 0, lx: 0, lhx: 0, sz: 0 });
     assert.strictEqual(keys(all, mergeSettings(S0, { align: { 'driver.wheel': { x: -100 } } })).split(' ')[0], 'driver.wheel@0', 'kept on the bar');
-    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0 }, 'defaults: centred');
+    assert.deepStrictEqual(mergeSettings(SETTINGS, {}).align.all, { x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, 'defaults: centred');
+    // the M logo is alignable (x / y) and resizable (sz), and stands apart from the 'all' nudge
+    const mT = mergeSettings(S0, { align: { all: { x: 50 }, m: { x: 20, y: -4, sz: 10 } } });
+    assert.deepStrictEqual(alignOf(mT, 'm'), { x: 20, ix: 0, y: -4, ly: 0, lx: 0, lhx: 0, sz: 10 }, 'M: its own offset, not moved by all');
+    assert.strictEqual(alignOf(mergeSettings(S0, { align: { m: { sz: 99 } } }), 'm').sz, 30, 'M size clamped to ALIGN_MAX.sz');
     // ly: the accent line's own vertical offset (onto the car's line), clamped
     assert.deepStrictEqual([mergeSettings(SETTINGS, { align: { 'driver.heat': { ly: 9 } } }).align['driver.heat'].ly, mergeSettings(SETTINGS, { align: { all: { ly: 999 } } }).align.all.ly], [9, 24]);
     const ia = mergeSettings(S0, { align: { all: { ix: 2 }, 'driver.heat': { ix: -7 }, 'driver.cool': { ix: 99 } } });
