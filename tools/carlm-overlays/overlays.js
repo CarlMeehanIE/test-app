@@ -698,7 +698,12 @@ function main() {
         if (!boot.up) return gpu.claim([]);
         const cl = shownSlots().map((x) => ({ x, y: 0, w: SW, h: H }));
         for (const l of leftLayout()) cl.push({ x: l.x, y: 0, w: l.w, h: H });
-        for (const b of shownButtons()) cl.push({ x: b.x - EXT_MAX, y: 0, w: drawW(L), h: H });
+        for (const b of shownButtons()) {
+            cl.push({ x: b.x, y: 0, w: BW, h: H });                                                  // the button itself (full height, where the tap lands)
+            // its accent line can reach EXT_MAX either side, but only at the line's height - claim just that thin strip so
+            // taps above it (the car's own +/- temperature buttons next to the button) still reach the HMI
+            cl.push({ x: b.x - EXT_MAX, y: L.lineY - MASK_PAD, w: drawW(L), h: L.lineH + 2 * MASK_PAD });
+        }
         gpu.claim(cl);
     }
     function targetAt(x) {
