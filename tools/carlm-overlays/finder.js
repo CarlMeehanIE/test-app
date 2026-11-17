@@ -143,54 +143,71 @@ function testRecord(done) {
     // the markers are set 1 s apart at least: find -newer compares whole seconds on some filesystems
 }
 
-/* ---- watch: read the VALUES of the car's cached signals and log each one as it changes ----
- * The head unit caches each SOME/IP signal it receives as a small file under /var/opt/public/con (the drive-mode
- * signal among them). watch() learns, in a quiet window, which files the unit writes on its own (noise), then polls
- * the rest by mtime and, when one's bytes change, logs "HH:MM:SS  short/path = <hex>". So cycling the drive mode
- * leaves one labelled value per mode in the log - read-only, nothing is written to the car. */
-const WATCH_DIRS = ['/var/opt/public/con'];
-const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 1000, WATCH_CAP = 64, WATCH_MAX_LOG = 90;
+/* ---- watch: log the VALUE of every car signal that changes while the user cycles the drive mode ----
+ * Detection reuses Record's proven, filesystem-wide `find -newer <marker>` (catches the signal by mtime wherever
+ * it lives, not just where we guessed), rooted at /var/opt/public where the SOME/IP message cache (con/) and the
+ * apps' logs sit. A quiet window learns what the unit writes on its own (noise); then, every couple of seconds,
+ * each changed non-noise file is read and logged "HH:MM:SS  short/path = <hex | \"text tail\">". So cycling the
+ * drive mode leaves one labelled value per mode in a single log. Read-only; nothing is written to the car. */
+const WATCH_ROOT = '/var/opt/public';
+const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 2500, WATCH_CAP = 80, WATCH_MAX_LOG = 140;
 function watcher(o) {
     o = o || {};
-    const dirs = o.dirs || WATCH_DIRS, extra = o.files || [];
+    const dir = o.dir || '/run/carlm-overlays', root = o.root || WATCH_ROOT;
     const quiet = o.quietMs || WATCH_QUIET_MS, every = o.intervalMs || WATCH_EVERY_MS;
     const cap = o.maxBytes || WATCH_CAP, maxLog = o.maxLog || WATCH_MAX_LOG;
-    let timer = null, noise = new Set(), last = new Map(), log = [], onCh = null;
+    const mark = path.join(dir, 'finder-watch-mark');
+    let noise = new Set(), log = [], seen = new Map(), onCh = null, timer = null, busy = false;
 
-    const files = () => {
-        const out = [];
-        for (const d of dirs) { try { for (const n of fs.readdirSync(d)) out.push(path.join(d, n)); } catch (e) { /* no dir */ } }
-        for (const f of extra) out.push(f);
-        return out;
-    };
-    const info = (p) => { try { const st = fs.statSync(p); if (!st.isFile()) return null; return { mt: st.mtimeMs, hex: fs.readFileSync(p).slice(0, cap).toString('hex') }; } catch (e) { return null; } };
+    const touch = (f) => fs.writeFileSync(f, `${Date.now()}\n`);
     const shortp = (p) => p.replace(/^\/var\/opt\/public\//, '').replace(/.*\/con\//, 'con/');
-    const note = (tag, p, hex) => {
-        const line = `${new Date().toTimeString().slice(0, 8)}  ${tag}${shortp(p)} = ${hex}`;
-        log.push(line); if (log.length > maxLog) log.shift();
-        if (onCh) onCh(line, log.length, log.slice());
+    const skip = (p) => /ECRYPTFS|\/carlm-overlays\//.test(p) || p === mark;
+    const valueOf = (p) => {
+        try {
+            const b = fs.readFileSync(p);
+            if (!b.length) return '(empty)';
+            const head = b.slice(0, cap).toString('latin1');
+            if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(head)) return `"${b.slice(-cap).toString('utf8').replace(/\s+/g, ' ').trim().slice(-64)}"`;
+            return b.slice(0, cap).toString('hex');
+        } catch (e) { return `(can't read: ${e.code || 'err'})`; }
+    };
+    const changedSinceMark = (cb) => {
+        const args = [root, '(', '-path', '*ECRYPTFS_*', '-prune', ')', '-o', '(', '-type', 'f', '-newer', mark, '-print', ')'];
+        execFile('find', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
+            if (e && e.code === 'ENOENT') return cb(new Error('no find on this unit'), []);
+            cb(null, String(out || '').split('\n').filter(Boolean));
+        });
     };
 
     function tick() {
-        for (const p of files()) {
-            if (noise.has(p)) continue;
-            const cur = info(p);
-            if (!cur) continue;
-            const prev = last.get(p);
-            if (!prev) { last.set(p, cur); note('(new) ', p, cur.hex); continue; }    // a signal cached for the first time
-            if (cur.mt === prev.mt || cur.hex === prev.hex) { last.set(p, cur); continue; }
-            last.set(p, cur); note('', p, cur.hex);
-        }
+        if (busy) return;
+        busy = true;
+        changedSinceMark((e, files) => {
+            try {
+                if (!e) for (const p of files) {
+                    if (noise.has(p) || skip(p)) continue;
+                    const v = valueOf(p);
+                    if (seen.get(p) === v) continue;          // only a NEW value for this file is worth a line
+                    seen.set(p, v);
+                    const line = `${new Date().toTimeString().slice(0, 8)}  ${shortp(p)} = ${v}`;
+                    log.push(line); if (log.length > maxLog) log.shift();
+                    if (onCh) onCh(line, log.length, log.slice());
+                }
+                try { touch(mark); } catch (te) { /* keep going */ }
+            } finally { busy = false; }
+        });
     }
     return {
         start(onReady, onChange) {
-            onCh = onChange; noise = new Set(); last = new Map(); log = [];
-            const a = new Map(); for (const p of files()) { const i = info(p); if (i) a.set(p, i.hex); }
-            setTimeout(() => {
-                for (const p of files()) { const i = info(p); if (!i) continue; if (a.has(p) && a.get(p) !== i.hex) noise.add(p); last.set(p, i); }
+            onCh = onChange; noise = new Set(); log = []; seen = new Map(); busy = false;
+            try { touch(mark); } catch (e) { return onReady(e); }
+            setTimeout(() => changedSinceMark((e, files) => {
+                if (e) return onReady(e);
+                noise = new Set(files.filter((f) => !skip(f)));
+                try { touch(mark); } catch (te) { /* none */ }
                 onReady(null, noise.size);
                 timer = setInterval(tick, every);
-            }, quiet);
+            }), quiet);
         },
         stop(cb) { if (timer) clearInterval(timer); timer = null; cb(log.slice()); }
     };
