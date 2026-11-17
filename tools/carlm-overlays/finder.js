@@ -13,12 +13,24 @@ const { execFile } = require('child_process');
 
 const DIRS = ['/etc', '/opt', '/usr/share'];
 const INCLUDE = ['*.json', '*.xml', '*.fdepl', '*.fidl', '*.conf', '*.ini', '*.cfg', '*.properties'];
-const WORDS = 'privacy|datenschutz|dataprotection|data_protection|vehiclelocation|vehicle_location|locationshar|location_shar|' +
-    'sharelocation|share_location|vehiclefinder|vehicle_finder|tracking|ortung|geoposition|positionsdaten|stolen';
+// the privacy / location words (the "track my car" find) and the drive-dynamics words (the Drive Mode find): the
+// Driving Experience switch (Fahrerlebnisschalter), its modes (Comfort / Sport / Sport+ / Sport Individual / Eco Pro)
+// and the four systems it sets (steering, drivetrain / powertrain, transmission, damping / adaptive). BMW's config
+// is mostly German, so both languages, and compounds over bare words to keep the noise down.
+const PRESETS = {
+    privacy: 'privacy|datenschutz|dataprotection|data_protection|vehiclelocation|vehicle_location|locationshar|location_shar|' +
+        'sharelocation|share_location|vehiclefinder|vehicle_finder|tracking|ortung|geoposition|positionsdaten|stolen',
+    drive: 'fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|drivingdynamic|driving_dynamic|drivedynamic|drive_dynamic|' +
+        'drivingexperience|driving_experience|drivemode|drive_mode|drivetrainswitch|drivetrain_switch|' +
+        'ecopro|eco_pro|sportindividual|sport_individual|sport_plus|adaptivemode|adaptive_mode|' +
+        'servotronic|lenkungskennlinie|daempfer|dampfer|damper|verstelldaempfer|edck|vdc|' +
+        'antriebsstrang|getriebekennlinie|efahrerlebnis|dynamicdrive'
+};
+const WORDS = PRESETS.privacy;   // the default, for callers that pass none
 const MAX_LINES = 400, KEEP = 200, TIMEOUT_MS = 60000;
 
-/* how telling a line is: a service / interface definition with an id, BMW's names, the privacy and location words over
- * the generic "tracking"; comments last */
+/* how telling a line is: a service / interface definition with an id, BMW's names, the search's own words over the
+ * generic ones ("tracking", "damper"); comments last */
 function score(l) {
     const text = l.replace(/^[^:]*:\d+:/, '');
     let n = 0;
@@ -26,6 +38,7 @@ function score(l) {
     if (/service|interface|instance|event|method|attribute|broadcast/i.test(text)) n += 3;
     if (/de\.bmw|bmw/i.test(l)) n += 2;
     if (/privacy|datenschutz|data_?protection|location|ortung|position|vehicle_?finder|stolen/i.test(text)) n += 2;
+    if (/fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|driv(ing|e)[_]?(dynamic|experience|mode)|drivetrain|servotronic|d[ae]mpfer|sport[_]?individual|eco[_]?pro/i.test(text)) n += 2;
     if (/^\s*(#|\/\/|;|<!--)/.test(text)) n -= 4;
     return n;
 }
@@ -40,7 +53,8 @@ function lines(out) {
 
 function scan(cb, o) {
     const dirs = (o && o.dirs) || DIRS, file = o && o.file;
-    const args = ['-rIinE', WORDS, '-m', '20', '--no-messages'].concat(INCLUDE.map((g) => `--include=${g}`), dirs);
+    const words = (o && o.words) || (o && o.preset && PRESETS[o.preset]) || WORDS;
+    const args = ['-rIinE', words, '-m', '20', '--no-messages'].concat(INCLUDE.map((g) => `--include=${g}`), dirs);
     execFile('grep', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
         // grep: 0 found, 1 nothing, 2 some dirs unreadable (results still good); a missing grep or a timeout: an error
         if (e && (e.code === 'ENOENT' || e.killed)) return cb(new Error(e.code === 'ENOENT' ? 'no grep on this unit' : 'scan took too long'));

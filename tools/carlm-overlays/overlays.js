@@ -1046,12 +1046,27 @@ function main() {
             scanning = true;
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
             send({ scanning: true });
-            log('finder: scanning');
-            finder.scan((e, r) => {
-                scanning = false;
-                log(`finder: ${e ? e.message : `${r.total} lines`}`);
-                send(e ? { error: e.message } : r);
-            }, { file: path.join(path.dirname(DATA), 'finder.txt') });
+            const dir = path.dirname(DATA);
+            // no preset named: both finds - privacy (the "track my car" setting) and drive (the Drive Mode controller);
+            // a named preset: just that one. Two presets -> each line tagged so they can be told apart.
+            const presets = q.preset === 'privacy' ? ['privacy'] : q.preset === 'drive' ? ['drive'] : ['privacy', 'drive'];
+            log(`finder: scanning (${presets.join(', ')})`);
+            const got = [];
+            (function next(i) {
+                if (i >= presets.length) {
+                    scanning = false;
+                    const all = [].concat.apply([], got);
+                    log(`finder: ${all.length} lines`);
+                    send({ at: new Date().toISOString(), total: all.length, lines: all });
+                    return;
+                }
+                const p = presets[i];
+                finder.scan((e, r) => {
+                    if (e) { scanning = false; log('finder: ' + e.message); send({ error: e.message }); return; }
+                    got.push(presets.length > 1 ? r.lines.map((l) => `[${p}] ${l}`) : r.lines);
+                    next(i + 1);
+                }, { preset: p, file: path.join(dir, p === 'drive' ? 'finder-drive.txt' : 'finder.txt') });
+            })(0);
         } else if (q.op === 'icons') {
             c.write(JSON.stringify({ icons: ICON_LIB.map(([name, title]) => {
                 let pic = null;
