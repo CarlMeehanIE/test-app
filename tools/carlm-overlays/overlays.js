@@ -92,6 +92,7 @@ const SCREENS = [
 // quick-select set (media, nav, home, apps, phone: the strip's own icons/*.png; fan: MDI at their size): icons/lib/LICENSE
 const ICON_LIB = [
     ['m-color', 'M'],
+    ['m-outline', 'M outline'],
     ['android-auto', 'Android Auto'],
     ['android-auto-color', 'Android Auto live'],
     ['media', 'Media'],
@@ -1363,7 +1364,7 @@ function test() {
     assert.deepStrictEqual([tt.w, tt.h, tf.w, tf.h], [100, 120, 37, APP_GLYPH]);
     // the shortcut icons are drawn at their final size: 76 px (no scaling, no blur), the glyph about the car's own. A
     // wide left-zone logo (m-color) is the exception: any width, fitted to the icon height at draw time
-    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.h <= 84 && (n === 'm-color' || im.w <= 84), n); });
+    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.h <= 84 && (n === 'm-color' || n === 'm-outline' || im.w <= 84), n); });
     assert.deepStrictEqual([png.fitH({ w: 238, h: 84, data: new Uint8Array(238 * 84 * 4) }, 76).w, png.fitH({ w: 40, h: 40, data: new Uint8Array(40 * 40 * 4) }, 76).w], [215, 40], 'fitH: wide to its height, small left alone');
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
