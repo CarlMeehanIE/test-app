@@ -1049,7 +1049,7 @@ function main() {
             const dir = path.dirname(DATA);
             // no preset named: both finds - privacy (the "track my car" setting) and drive (the Drive Mode controller);
             // a named preset: just that one. Two presets -> each line tagged so they can be told apart.
-            const presets = q.preset === 'privacy' ? ['privacy'] : q.preset === 'drive' ? ['drive'] : ['privacy', 'drive'];
+            const presets = q.preset === 'privacy' ? ['privacy'] : q.preset === 'drive' ? ['drive'] : ['drive', 'privacy'];
             log(`finder: scanning (${presets.join(', ')})`);
             const got = [];
             (function next(i) {
