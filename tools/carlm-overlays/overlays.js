@@ -981,8 +981,9 @@ function main() {
 
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
-    let scanning = false;
+    let scanning = false, watching = false;
     const rec = finder.recorder({ dir: path.dirname(CTL) });
+    const watch = finder.watcher({ files: ['/var/opt/public/oap/oap_12242/data/car_vitals.log'] });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
@@ -1040,6 +1041,28 @@ function main() {
                 send({ recording: 'listing' });
                 rec.stop((e, r) => { log(`finder: ${e ? e.message : `${r.total} files changed`}`); send(e ? { error: e.message } : r); },
                     path.join(path.dirname(DATA), 'finder-record.txt'));
+            }
+        } else if (q.op === 'watch' && (q.phase === 'start' || q.phase === 'stop')) {
+            // the Finder's Watch: log each cached signal's VALUE as it changes while the user cycles the drive mode
+            const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
+            if (q.phase === 'start') {
+                if (watching) return;
+                watching = true;
+                send({ watching: 'quiet' });
+                log('finder: watching, quiet window');
+                watch.start((e, n) => {
+                    if (e) { watching = false; log('finder: ' + e.message); send({ error: e.message }); return; }
+                    log(`finder: watching live (${n} noisy files left out)`);
+                    send({ watching: 'live', kind: 'watch', noise: n, total: 0, lines: [] });
+                }, (line, total, lines) => send({ watching: 'live', kind: 'watch', total, lines }));
+            } else {
+                if (!watching) return;
+                watch.stop((lines) => {
+                    watching = false;
+                    log(`finder: watch stopped (${lines.length} value changes)`);
+                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
+                    send({ kind: 'watch', total: lines.length, lines });
+                });
             }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
             if (scanning) return;

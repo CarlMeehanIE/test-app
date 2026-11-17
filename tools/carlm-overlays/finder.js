@@ -143,5 +143,58 @@ function testRecord(done) {
     // the markers are set 1 s apart at least: find -newer compares whole seconds on some filesystems
 }
 
-module.exports = { scan, lines, WORDS, recorder, rankFiles, test, testRecord };
+/* ---- watch: read the VALUES of the car's cached signals and log each one as it changes ----
+ * The head unit caches each SOME/IP signal it receives as a small file under /var/opt/public/con (the drive-mode
+ * signal among them). watch() learns, in a quiet window, which files the unit writes on its own (noise), then polls
+ * the rest by mtime and, when one's bytes change, logs "HH:MM:SS  short/path = <hex>". So cycling the drive mode
+ * leaves one labelled value per mode in the log - read-only, nothing is written to the car. */
+const WATCH_DIRS = ['/var/opt/public/con'];
+const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 1000, WATCH_CAP = 64, WATCH_MAX_LOG = 90;
+function watcher(o) {
+    o = o || {};
+    const dirs = o.dirs || WATCH_DIRS, extra = o.files || [];
+    const quiet = o.quietMs || WATCH_QUIET_MS, every = o.intervalMs || WATCH_EVERY_MS;
+    const cap = o.maxBytes || WATCH_CAP, maxLog = o.maxLog || WATCH_MAX_LOG;
+    let timer = null, noise = new Set(), last = new Map(), log = [], onCh = null;
+
+    const files = () => {
+        const out = [];
+        for (const d of dirs) { try { for (const n of fs.readdirSync(d)) out.push(path.join(d, n)); } catch (e) { /* no dir */ } }
+        for (const f of extra) out.push(f);
+        return out;
+    };
+    const info = (p) => { try { const st = fs.statSync(p); if (!st.isFile()) return null; return { mt: st.mtimeMs, hex: fs.readFileSync(p).slice(0, cap).toString('hex') }; } catch (e) { return null; } };
+    const shortp = (p) => p.replace(/^\/var\/opt\/public\//, '').replace(/.*\/con\//, 'con/');
+    const note = (tag, p, hex) => {
+        const line = `${new Date().toTimeString().slice(0, 8)}  ${tag}${shortp(p)} = ${hex}`;
+        log.push(line); if (log.length > maxLog) log.shift();
+        if (onCh) onCh(line, log.length, log.slice());
+    };
+
+    function tick() {
+        for (const p of files()) {
+            if (noise.has(p)) continue;
+            const cur = info(p);
+            if (!cur) continue;
+            const prev = last.get(p);
+            if (!prev) { last.set(p, cur); note('(new) ', p, cur.hex); continue; }    // a signal cached for the first time
+            if (cur.mt === prev.mt || cur.hex === prev.hex) { last.set(p, cur); continue; }
+            last.set(p, cur); note('', p, cur.hex);
+        }
+    }
+    return {
+        start(onReady, onChange) {
+            onCh = onChange; noise = new Set(); last = new Map(); log = [];
+            const a = new Map(); for (const p of files()) { const i = info(p); if (i) a.set(p, i.hex); }
+            setTimeout(() => {
+                for (const p of files()) { const i = info(p); if (!i) continue; if (a.has(p) && a.get(p) !== i.hex) noise.add(p); last.set(p, i); }
+                onReady(null, noise.size);
+                timer = setInterval(tick, every);
+            }, quiet);
+        },
+        stop(cb) { if (timer) clearInterval(timer); timer = null; cb(log.slice()); }
+    };
+}
+
+module.exports = { scan, lines, WORDS, recorder, watcher, rankFiles, test, testRecord };
 if (require.main === module) { test(); testRecord(() => console.log('finder record self-check ok')); }
