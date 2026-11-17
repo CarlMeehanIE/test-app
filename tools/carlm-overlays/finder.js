@@ -13,31 +13,25 @@ const { execFile } = require('child_process');
 
 const DIRS = ['/etc', '/opt', '/usr/share'];
 const INCLUDE = ['*.json', '*.xml', '*.fdepl', '*.fidl', '*.conf', '*.ini', '*.cfg', '*.properties'];
-// the privacy / location words (the "track my car" find) and the drive-dynamics words (the Drive Mode find): the
-// Driving Experience switch (Fahrerlebnisschalter), its modes (Comfort / Sport / Sport+ / Sport Individual / Eco Pro)
-// and the four systems it sets (steering, drivetrain / powertrain, transmission, damping / adaptive). BMW's config
-// is mostly German, so both languages, and compounds over bare words to keep the noise down.
-const PRESETS = {
-    privacy: 'privacy|datenschutz|dataprotection|data_protection|vehiclelocation|vehicle_location|locationshar|location_shar|' +
-        'sharelocation|share_location|vehiclefinder|vehicle_finder|tracking|ortung|geoposition|positionsdaten|stolen',
-    drive: 'fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|drivingdynamic|driving_dynamic|drivedynamic|drive_dynamic|' +
-        'drivingexperience|driving_experience|drivemode|drive_mode|drivetrainswitch|drivetrain_switch|' +
-        'ecopro|eco_pro|sportindividual|sport_individual|sport_plus|adaptivemode|adaptive_mode|' +
-        'servotronic|lenkungskennlinie|daempfer|dampfer|damper|verstelldaempfer|edck|vdc|' +
-        'antriebsstrang|getriebekennlinie|efahrerlebnis|dynamicdrive'
-};
-const WORDS = PRESETS.privacy;   // the default, for callers that pass none
+// the drive-dynamics words: the Driving Experience switch (Fahrerlebnisschalter), its modes (Comfort / Sport / Sport+
+// / Sport Individual / Eco Pro) and the four systems it sets (steering, drivetrain / powertrain, transmission,
+// damping / adaptive). BMW's config is mostly German, so both languages, and compounds over bare words to keep the
+// noise down.
+const WORDS = 'fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|drivingdynamic|driving_dynamic|drivedynamic|drive_dynamic|' +
+    'drivingexperience|driving_experience|drivemode|drive_mode|drivetrainswitch|drivetrain_switch|' +
+    'ecopro|eco_pro|sportindividual|sport_individual|sport_plus|adaptivemode|adaptive_mode|' +
+    'servotronic|lenkungskennlinie|daempfer|dampfer|damper|verstelldaempfer|edck|vdc|' +
+    'antriebsstrang|getriebekennlinie|efahrerlebnis|dynamicdrive';
 const MAX_LINES = 400, KEEP = 200, TIMEOUT_MS = 60000;
 
-/* how telling a line is: a service / interface definition with an id, BMW's names, the search's own words over the
- * generic ones ("tracking", "damper"); comments last */
+/* how telling a line is: a service / interface definition with an id, BMW's names, the drive-dynamics words over the
+ * generic ones ("damper"); comments last */
 function score(l) {
     const text = l.replace(/^[^:]*:\d+:/, '');
     let n = 0;
     if (/0x[0-9a-f]{3,4}\b/i.test(text)) n += 3;
     if (/service|interface|instance|event|method|attribute|broadcast/i.test(text)) n += 3;
     if (/de\.bmw|bmw/i.test(l)) n += 2;
-    if (/privacy|datenschutz|data_?protection|location|ortung|position|vehicle_?finder|stolen/i.test(text)) n += 2;
     if (/fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|driv(ing|e)[_]?(dynamic|experience|mode)|drivetrain|servotronic|d[ae]mpfer|sport[_]?individual|eco[_]?pro/i.test(text)) n += 2;
     if (/^\s*(#|\/\/|;|<!--)/.test(text)) n -= 4;
     return n;
@@ -53,7 +47,7 @@ function lines(out) {
 
 function scan(cb, o) {
     const dirs = (o && o.dirs) || DIRS, file = o && o.file;
-    const words = (o && o.words) || (o && o.preset && PRESETS[o.preset]) || WORDS;
+    const words = (o && o.words) || WORDS;
     const args = ['-rIinE', words, '-m', '20', '--no-messages'].concat(INCLUDE.map((g) => `--include=${g}`), dirs);
     execFile('grep', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
         // grep: 0 found, 1 nothing, 2 some dirs unreadable (results still good); a missing grep or a timeout: an error
@@ -67,11 +61,11 @@ function scan(cb, o) {
 
 function test() {
     const assert = require('assert');
-    const got = lines('/etc/vsomeip/hmi.json:12:   "service" : "0xb6a1", "name": "PrivacySettings"\n' +
-        '/var/opt/carlm-overlays/x.json:1: privacy\n/opt/x/oap_5/rhmi.json:3: Tracking\n');
-    assert.deepStrictEqual(got, ['/etc/vsomeip/hmi.json:12: "service" : "0xb6a1", "name": "PrivacySettings"'], 'ours and the apps\' left out');
-    assert.deepStrictEqual(lines('/etc/a.conf:1: # key tracking notes\n/etc/b.json:2: "service":"0xb6a1" privacy\n'),
-        ['/etc/b.json:2: "service":"0xb6a1" privacy', '/etc/a.conf:1: # key tracking notes'], 'a service with an id first, comments last');
+    const got = lines('/etc/vsomeip/hmi.json:12:   "service" : "0xb521", "name": "DrivingDynamics"\n' +
+        '/var/opt/carlm-overlays/x.json:1: fahrmodus\n/opt/x/oap_5/rhmi.json:3: Fahrdynamik\n');
+    assert.deepStrictEqual(got, ['/etc/vsomeip/hmi.json:12: "service" : "0xb521", "name": "DrivingDynamics"'], 'ours and the apps\' left out');
+    assert.deepStrictEqual(lines('/etc/a.conf:1: # key fahrdynamik notes\n/etc/b.json:2: "service":"0xb521" fahrmodus\n'),
+        ['/etc/b.json:2: "service":"0xb521" fahrmodus', '/etc/a.conf:1: # key fahrdynamik notes'], 'a service with an id first, comments last');
     // a real run on this machine's /etc: grep is there, it answers, the result is bounded
     let done = false;
     scan((e, r) => { assert.ifError(e); assert(Array.isArray(r.lines) && r.lines.length <= MAX_LINES); done = true; }, { dirs: [path.join(__dirname)] });
@@ -81,7 +75,7 @@ function test() {
 /* ---- record: which files change while the user flips the menu item (read-only: find -newer, a marker file of ours) ----
  * start(): a marker now; QUIET_MS later a second one, and the files changed in between (what the unit writes by itself:
  * logs, counters) are kept as noise. stop(): the files changed since the second marker, less the noise, the most
- * telling first (privacy / location words, then settings-like places). */
+ * telling first (drive-dynamics words, then settings-like places). */
 const QUIET_MS = 10000;
 const PRUNE = ['/proc', '/sys', '/dev'];
 const changedSince = (mark, cb, root) => {
