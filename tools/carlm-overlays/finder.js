@@ -143,71 +143,68 @@ function testRecord(done) {
     // the markers are set 1 s apart at least: find -newer compares whole seconds on some filesystems
 }
 
-/* ---- watch: log the VALUE of every car signal that changes while the user cycles the drive mode ----
- * Detection reuses Record's proven, filesystem-wide `find -newer <marker>` (catches the signal by mtime wherever
- * it lives, not just where we guessed), rooted at /var/opt/public where the SOME/IP message cache (con/) and the
- * apps' logs sit. A quiet window learns what the unit writes on its own (noise); then, every couple of seconds,
- * each changed non-noise file is read and logged "HH:MM:SS  short/path = <hex | \"text tail\">". So cycling the
- * drive mode leaves one labelled value per mode in a single log. Read-only; nothing is written to the car. */
-const WATCH_ROOT = '/var/opt/public';
-const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 2500, WATCH_CAP = 80, WATCH_MAX_LOG = 140;
+/* ---- watch: log the VALUE of each cached SOME/IP signal as it changes while the user cycles drive settings ----
+ * Scoped to /var/opt/public/con (the signal cache, where Record #1 found the drive-mode file). The earlier try
+ * watched too wide and judged "noise" by file timestamp, so the drive-mode cache - which the unit rewrites on a
+ * heartbeat - got thrown out with all the other con files. This judges noise by VALUE: during the quiet window a
+ * file is noise only if its CONTENT changes on its own; a heartbeat that rewrites the same bytes is kept. Then it
+ * logs a file only when its value actually changes (so heartbeats stay silent), reading only files whose mtime
+ * moved. `always` basenames are never treated as noise (the known drive-mode file). Read-only. */
+const WATCH_CON = '/var/opt/public/con';
+const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 1500, WATCH_CAP = 96, WATCH_MAX_LOG = 180;
 function watcher(o) {
     o = o || {};
-    const dir = o.dir || '/run/carlm-overlays', root = o.root || WATCH_ROOT;
+    const wdir = o.watchDir || WATCH_CON;
     const quiet = o.quietMs || WATCH_QUIET_MS, every = o.intervalMs || WATCH_EVERY_MS;
     const cap = o.maxBytes || WATCH_CAP, maxLog = o.maxLog || WATCH_MAX_LOG;
-    const mark = path.join(dir, 'finder-watch-mark');
-    let noise = new Set(), log = [], seen = new Map(), onCh = null, timer = null, busy = false;
+    const always = new Set(o.always || []);
+    let noise = new Set(), last = new Map(), log = [], onCh = null, timer = null, busy = false;
 
-    const touch = (f) => fs.writeFileSync(f, `${Date.now()}\n`);
-    const shortp = (p) => p.replace(/^\/var\/opt\/public\//, '').replace(/.*\/con\//, 'con/');
-    const skip = (p) => /ECRYPTFS|\/carlm-overlays\//.test(p) || p === mark;
+    const listF = () => { try { return fs.readdirSync(wdir).map((n) => path.join(wdir, n)); } catch (e) { return []; } };
+    const base = (p) => p.replace(/.*\//, '');
+    const mtimeOf = (p) => { try { const s = fs.statSync(p); return s.isFile() ? s.mtimeMs : null; } catch (e) { return null; } };
     const valueOf = (p) => {
         try {
             const b = fs.readFileSync(p);
             if (!b.length) return '(empty)';
             const head = b.slice(0, cap).toString('latin1');
-            if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(head)) return `"${b.slice(-cap).toString('utf8').replace(/\s+/g, ' ').trim().slice(-64)}"`;
+            if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(head)) return `"${b.slice(-cap).toString('utf8').replace(/\s+/g, ' ').trim().slice(-72)}"`;
             return b.slice(0, cap).toString('hex');
         } catch (e) { return `(can't read: ${e.code || 'err'})`; }
     };
-    const changedSinceMark = (cb) => {
-        const args = [root, '(', '-path', '*ECRYPTFS_*', '-prune', ')', '-o', '(', '-type', 'f', '-newer', mark, '-print', ')'];
-        execFile('find', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
-            if (e && e.code === 'ENOENT') return cb(new Error('no find on this unit'), []);
-            cb(null, String(out || '').split('\n').filter(Boolean));
-        });
+    const note = (tag, p, v) => {
+        const line = `${new Date().toTimeString().slice(0, 8)}  ${tag}con/${base(p)} = ${v}`;
+        log.push(line); if (log.length > maxLog) log.shift();
+        if (onCh) onCh(line, log.length, log.slice());
     };
 
     function tick() {
         if (busy) return;
         busy = true;
-        changedSinceMark((e, files) => {
-            try {
-                if (!e) for (const p of files) {
-                    if (noise.has(p) || skip(p)) continue;
-                    const v = valueOf(p);
-                    if (seen.get(p) === v) continue;          // only a NEW value for this file is worth a line
-                    seen.set(p, v);
-                    const line = `${new Date().toTimeString().slice(0, 8)}  ${shortp(p)} = ${v}`;
-                    log.push(line); if (log.length > maxLog) log.shift();
-                    if (onCh) onCh(line, log.length, log.slice());
-                }
-                try { touch(mark); } catch (te) { /* keep going */ }
-            } finally { busy = false; }
-        });
+        try {
+            for (const p of listF()) {
+                const mt = mtimeOf(p);
+                if (mt === null) continue;
+                const prev = last.get(p);
+                if (prev && prev.mt === mt) continue;                 // mtime unmoved -> value unmoved, skip the read
+                const v = valueOf(p);
+                if (noise.has(p)) { last.set(p, { mt, v }); continue; }
+                if (prev && prev.v === v) { last.set(p, { mt, v }); continue; }   // rewritten with the same value
+                const fresh = !prev;
+                last.set(p, { mt, v });
+                note(fresh ? '(new) ' : '', p, v);
+            }
+        } finally { busy = false; }
     }
     return {
         start(onReady, onChange) {
-            onCh = onChange; noise = new Set(); log = []; seen = new Map(); busy = false;
-            try { touch(mark); } catch (e) { return onReady(e); }
-            setTimeout(() => changedSinceMark((e, files) => {
-                if (e) return onReady(e);
-                noise = new Set(files.filter((f) => !skip(f)));
-                try { touch(mark); } catch (te) { /* none */ }
+            onCh = onChange; noise = new Set(); last = new Map(); log = []; busy = false;
+            const a = new Map(); for (const p of listF()) a.set(p, valueOf(p));
+            setTimeout(() => {
+                for (const p of listF()) { const v = valueOf(p), mt = mtimeOf(p); if (a.has(p) && a.get(p) !== v && !always.has(base(p))) noise.add(p); last.set(p, { mt, v }); }
                 onReady(null, noise.size);
                 timer = setInterval(tick, every);
-            }), quiet);
+            }, quiet);
         },
         stop(cb) { if (timer) clearInterval(timer); timer = null; cb(log.slice()); }
     };
