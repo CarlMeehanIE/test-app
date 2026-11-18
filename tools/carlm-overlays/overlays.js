@@ -1042,28 +1042,21 @@ function main() {
                     path.join(path.dirname(DATA), 'finder-record.txt'));
             }
         } else if (q.op === 'watch' && (q.phase === 'start' || q.phase === 'stop')) {
-            // the Finder's Watch (now a two-tap snapshot diff + diagnostics): tap once to grab a baseline of the con
-            // signal cache, change the drive mode, tap Stop to see exactly which con file changed and before -> after.
+            // the Finder's Watch (two-tap diff over ALL of /var/opt, not just con): tap to set a baseline, change the
+            // drive mode, tap Stop to see every file that changed and its value. con/ turned out to be the wrong place.
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
-            const KF = '/var/opt/public/con/B78_B6_FE_59_EB_74.Message139';
+            const WMARK = path.join(path.dirname(DATA), 'finder-watch-mark');
             if (q.phase === 'start') {
-                finder.conSnapshot((snap) => {
-                    watchBase = snap;
-                    const kfv = fs.existsSync(KF) ? finder.readValue(KF) : '(not present now)';
-                    log(`finder: watch baseline (${snap.count} con files, ${snap.readable} readable)`);
-                    send({ watching: 'live', kind: 'watch', total: 0, lines: [
-                        `con: ${snap.count} files${snap.dirErr ? ' - ' + snap.dirErr : ''}, ${snap.readable} readable, ${snap.unreadable} not`,
-                        `known B78_..Message139 = ${kfv}`,
-                        'baseline captured - now change the drive mode (one or several), then tap Stop',
-                    ] });
-                });
+                try { fs.writeFileSync(WMARK, `${Date.now()}\n`); watchBase = WMARK; } catch (e) { log('finder: watch mark: ' + e.message); send({ error: e.message }); return; }
+                log('finder: watch baseline set (/var/opt)');
+                send({ watching: 'live', kind: 'watch', total: 0, lines: ['baseline set across /var/opt - now change the drive mode (one or several), then tap Stop'] });
             } else {
                 if (!watchBase) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then change the mode, then Stop'] }); }
-                else finder.conSnapshot((snap) => {
-                    const diff = finder.conDiff(watchBase, snap);
-                    log(`finder: watch diff (${diff.length} con files changed)`);
-                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${diff.join('\n')}\n`); } catch (we) { /* none */ }
-                    send({ kind: 'watch', total: diff.length, lines: diff.length ? diff : [`no con file changed between the two taps (con had ${snap.count} files, ${snap.readable} readable)`] });
+                else finder.changedValues(watchBase, (r) => {
+                    const lines = r.lines.slice(0, 80).concat(r.enc ? [`(+${r.enc} encrypted files also changed - can't read their values)`] : []);
+                    log(`finder: watch diff (${r.lines.length} readable, ${r.enc} encrypted changed)`);
+                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
+                    send({ kind: 'watch', total: lines.length, lines: lines.length ? lines : ['nothing changed under /var/opt between the two taps'] });
                 });
             }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files

@@ -243,5 +243,25 @@ function conDiff(base, now) {
     return lines;
 }
 
-module.exports = { scan, lines, WORDS, recorder, watcher, conSnapshot, conDiff, readValue, rankFiles, test, testRecord };
+/* changedValues: every file under /var/opt modified since the baseline mark (Record's proven detection), with its
+ * value - the drive-mode signal is in here somewhere, no longer assumed to be con/. Encrypted files (ECRYPTFS) can't
+ * be read, so they're counted, not shown: if ONLY those change on a mode switch, the mode state is encrypted and we
+ * pivot to subscribing by service. Read-only. */
+function changedValues(markPath, cb, root) {
+    root = root || '/var/opt';
+    execFile('find', [root, '-newer', markPath, '-type', 'f', '-print'], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (e, out) => {
+        const files = String(out || '').split('\n').filter(Boolean);
+        const lines = [];
+        let enc = 0;
+        for (const p of files) {
+            if (p === markPath || /\/carlm-overlays\//.test(p)) continue;
+            if (/ECRYPTFS/.test(p)) { enc++; continue; }
+            const short = p.replace(/^\/var\/opt\//, '').replace(/.*\/con\//, 'con/');
+            lines.push(`${short} = ${readValue(p)}`);
+        }
+        cb({ lines, enc, total: files.length });
+    });
+}
+
+module.exports = { scan, lines, WORDS, recorder, watcher, conSnapshot, conDiff, changedValues, readValue, rankFiles, test, testRecord };
 if (require.main === module) { test(); testRecord(() => console.log('finder record self-check ok')); }
