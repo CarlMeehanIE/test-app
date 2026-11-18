@@ -998,7 +998,7 @@ function main() {
 
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
-    let scanning = false, sigwatch = null;
+    let scanning = false, sigwatch = null, watchChild = null;
     const rec = finder.recorder({ dir: path.dirname(CTL) });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
@@ -1059,25 +1059,59 @@ function main() {
                     path.join(path.dirname(DATA), 'finder-record.txt'));
             }
         } else if (q.op === 'watch' && (q.phase === 'start' || q.phase === 'stop')) {
-            // the Finder's Watch (now a LIVE SIGNAL watch): the cluster layout changes with the drive mode, and the
-            // cluster signals ride the bus the tool already listens on - so log each live signal's value as it changes
-            // while the user cycles modes. Also cast a wide net on Vehicle2 (0xB519, the cluster service) to catch a
-            // finer mode signal than the cluster-view one we already read. Read-only.
+            // the Finder's Watch: find the signal that carries the FULL drive mode (all six), not just the cluster-view
+            // flag (0x807c, only 2 values). Two probes at once, both read-only:
+            //  (1) DISCOVERY - a second hmictl in `watch` mode (its own vsomeip app name) to enumerate what services the
+            //      car actually offers, so we can find the drive-mode/DEC service we've never subscribed to.
+            //  (2) SIGNALS   - broaden our own subscriptions on the known services (cluster, M, powertrain, condition)
+            //      across their getter ranges, and log every value that changes while the modes are cycled.
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
+            const compose = () => {
+                const d = sigwatch.disco, s = sigwatch.log;
+                const lines = [];
+                lines.push(`— services the car is offering (${d.length}) —`);
+                for (const x of d) lines.push(x);
+                lines.push(`— live signal changes while you cycle modes (${s.length}) —`);
+                for (const x of s) lines.push(x);
+                return lines;
+            };
             if (q.phase === 'start') {
-                sigwatch = { last: new Map(), log: [], rate: new Map(), noisy: new Set(), send };
-                for (let base = 0x8000; base < 0x8100; base += 0x20) {    // broaden 0xb519 across its getter range, 32 events a line
-                    const evs = []; for (let e = base; e < base + 0x20; e++) evs.push('0x' + e.toString(16));
-                    hmi(`sub 0xb519 1 1 1 ${evs.join(' ')}`);
-                }
-                log('finder: signal watch on (broadened 0xb519)');
-                send({ watching: 'live', kind: 'watch', total: 0, lines: ['watching the live cluster signals - now cycle the drive modes slowly (pause on each), then tap Stop'] });
+                sigwatch = { last: new Map(), log: [], rate: new Map(), noisy: new Set(), disco: [], discoSeen: new Set(), send, compose };
+                // (1) discovery: separate hmictl, distinct vsomeip app name so it doesn't clash with our `serve` client
+                try {
+                    watchChild = spawn(HMICTL, ['watch'], { stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign({}, process.env, { VSOMEIP_APPLICATION_NAME: 'carlm_overlays_w' }) });
+                    let wb = '';
+                    const onWatch = (d) => {
+                        wb += d;
+                        for (let n; (n = wb.indexOf('\n')) >= 0; wb = wb.slice(n + 1)) {
+                            const ln = wb.slice(0, n).trim();
+                            if (!ln || !sigwatch) continue;
+                            if (sigwatch.discoSeen.has(ln)) continue;        // distinct lines only
+                            sigwatch.discoSeen.add(ln);
+                            if (sigwatch.disco.length < 260) { sigwatch.disco.push(ln); send({ watching: 'live', kind: 'watch', total: sigwatch.disco.length + sigwatch.log.length, lines: compose() }); }
+                        }
+                    };
+                    watchChild.stdout.on('data', onWatch);
+                    watchChild.stderr.on('data', onWatch);               // hmictl may print discovery on stderr
+                    watchChild.on('error', (e) => { if (sigwatch && !sigwatch.discoSeen.has('watch: ' + e.message)) { sigwatch.discoSeen.add('watch: ' + e.message); sigwatch.disco.push('watch failed to start: ' + e.message); } });
+                    watchChild.on('exit', (c) => { log('hmictl watch exited ' + c); });
+                } catch (we) { log('hmictl watch: ' + we.message); }
+                // (2) signals: broaden the KNOWN services across their getter ranges, each with its own eventgroup(s)
+                const wide = (svc, grp, hi) => { for (let base = 0x8000; base < hi; base += 0x20) { const evs = []; for (let e = base; e < base + 0x20 && e < hi; e++) evs.push('0x' + e.toString(16)); hmi(`sub 0x${svc.toString(16)} 1 1 ${grp} ${evs.join(' ')}`); } };
+                wide(0xb519, 1, 0x8200);   // cluster/Vehicle2 - extend past 0x80FF this time
+                wide(0xb51f, 1, 0x8100);   // M / MDrive
+                wide(0xb513, 1, 0x8100);   // powertrain
+                [1, 2, 3].forEach((g) => wide(0x1531, g, 0x8100));   // vehicle condition - eventgroup unknown, try 1/2/3
+                log('finder: watch on (discovery + broadened signals)');
+                send({ watching: 'live', kind: 'watch', total: 0, lines: ['probing… give it ~5 s to list services, then cycle the drive modes slowly (pause on each), then tap Stop'] });
             } else {
                 if (!sigwatch) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then cycle the modes, then Stop'] }); return; }
-                const out = sigwatch.log.slice(); sigwatch = null;
-                log(`finder: signal watch off (${out.length} value changes)`);
-                try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${out.join('\n')}\n`); } catch (we) { /* none */ }
-                send({ kind: 'watch', total: out.length, lines: out.length ? out : ['no live signals changed - try again on the home/driving screen, or the layout may be driven off-bus'] });
+                if (watchChild) { try { watchChild.kill(); } catch (ke) { /* gone */ } watchChild = null; }
+                const lines = sigwatch.compose(), n = sigwatch.disco.length + sigwatch.log.length; sigwatch = null;
+                if (child) child.kill();                 // drop the broadened subscriptions: serve respawns with defaults
+                log(`finder: watch off (${n} lines)`);
+                try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
+                send({ kind: 'watch', total: n, lines: n ? lines : ['nothing captured - the probe may not have started; try again on the driving/home screen'] });
             }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
             if (scanning) return;
