@@ -1113,17 +1113,49 @@ function main() {
                 try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
                 send({ kind: 'watch', total: n, lines: n ? lines : ['nothing captured - the probe may not have started; try again on the driving/home screen'] });
             }
-        } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
+        } else if (q.op === 'scan') {                  // the Finder page: now targets the DRIVE-MODE signal's IDs
             if (scanning) return;
             scanning = true;
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
             send({ scanning: true });
-            log('finder: scanning');
-            finder.scan((e, r) => {
-                scanning = false;
-                log(`finder: ${e ? e.message : `${r.total} lines`}`);
-                send(e ? { error: e.message } : r);
-            }, { file: path.join(path.dirname(DATA), 'finder.txt') });
+            log('finder: scanning for the FES / drive-mode service IDs');
+            // Two catalogs on the unit tell us the numbers hmictl needs:
+            //  - /etc/vsomeip/hmi.json: service id -> friendly name (e.g. 0xb521 "DrivingDynamics")
+            //  - /etc/oap/someip/someip-interfaces.json: interface name -> service/event ids.
+            // We want de.bmw.infotainment.drivingexcitement.FES / statusFESVehicleDynamicSwitchHMI
+            //   . actualValueModeDrivingExperience (the full drive mode: 1 Sport .. 10 Adaptive).
+            const seg = (s) => { const o = []; for (let i = 0; i < s.length; i += 200) o.push(s.slice(i, i + 200)); return o; };
+            const tryRead = (cands) => { for (const p of cands) { try { return { p, t: fs.readFileSync(p, 'utf8') }; } catch (e) { /* next */ } } return null; };
+            const out = [];
+            try {
+                // (A) service-id -> name map
+                const hmi = tryRead(['/etc/vsomeip/hmi.json', '/etc/vsomeip/vsomeip.json', '/opt/etc/vsomeip/hmi.json']);
+                if (hmi) {
+                    out.push(`=== ${hmi.p} : services by name ===`);
+                    const re = /"service"\s*:\s*"?(0x[0-9a-fA-F]+)"?[^}]*?"name"\s*:\s*"([^"]+)"|"name"\s*:\s*"([^"]+)"[^}]*?"service"\s*:\s*"?(0x[0-9a-fA-F]+)"?/g;
+                    let m, all = [];
+                    while ((m = re.exec(hmi.t)) && all.length < 400) { const id = m[1] || m[4], nm = m[2] || m[3]; if (id && nm) all.push(`${id}  ${nm}`); }
+                    const hits = all.filter((x) => /driv|dynam|\bfes\b|experien|fahr|mode|excit/i.test(x));
+                    out.push(`-- drive/dynamics matches (${hits.length}) --`); hits.forEach((x) => out.push(x));
+                    out.push(`-- all services (${all.length}) --`); all.forEach((x) => out.push(x));
+                } else out.push('no /etc/vsomeip/hmi.json found');
+                // (B) interface catalog -> the FES numeric ids
+                const cat = tryRead(['/etc/oap/someip/someip-interfaces.json', '/etc/oap/someip-interfaces.json', '/opt/oap/someip/someip-interfaces.json']);
+                if (cat) {
+                    out.push(`=== ${cat.p} (${cat.t.length} bytes) : FES slices ===`);
+                    const terms = ['drivingexcitement.FES', 'statusFESVehicleDynamicSwitchHMI', 'actualValueModeDrivingExperience'];
+                    for (const tm of terms) {
+                        let i = cat.t.indexOf(tm), n = 0;
+                        if (i < 0) { out.push(`-- "${tm}": not found --`); continue; }
+                        while (i >= 0 && n < 2) { const a = Math.max(0, i - 1400), b = Math.min(cat.t.length, i + tm.length + 1400); out.push(`-- "${tm}" @${i} --`); seg(cat.t.slice(a, b)).forEach((x) => out.push(x)); n++; i = cat.t.indexOf(tm, b); }
+                    }
+                } else out.push('no someip-interfaces.json found at the usual paths');
+            } catch (e) { out.push('scan error: ' + e.message); }
+            const lines = out.slice(0, 900);
+            try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-fes.txt'), out.join('\n') + '\n'); } catch (we) { /* none */ }
+            scanning = false;
+            log(`finder: FES scan done (${lines.length} lines)`);
+            send({ kind: 'scan', at: new Date().toISOString(), total: lines.length, lines });
         } else if (q.op === 'icons') {
             c.write(JSON.stringify({ icons: ICON_LIB.map(([name, title]) => {
                 let pic = null;
