@@ -765,12 +765,19 @@ function main() {
     }
     function sigLog(svc, ev, hex) {                      // the Finder's signal watch: log each live signal as its value changes
         const key = `${svc},${ev}`;
+        if (sigwatch.noisy.has(key)) return;             // a telemetry signal (speed/rpm/…) we've already hidden
         if (sigwatch.last.get(key) === hex) return;      // only a NEW value for this signal
+        const now = Date.now(), hist = sigwatch.rate.get(key) || [];
+        hist.push(now); while (hist.length && hist[0] < now - 2000) hist.shift();
+        sigwatch.rate.set(key, hist);
+        const push = (line) => { sigwatch.log.push(line); if (sigwatch.log.length > 240) sigwatch.log.shift(); sigwatch.send({ watching: 'live', kind: 'watch', total: sigwatch.log.length, lines: sigwatch.log.slice() }); };
+        if (hist.length >= 5) {                          // ≥5 changes in 2 s = constant telemetry, not a mode signal: hide it
+            sigwatch.noisy.add(key);
+            return push(`${new Date().toTimeString().slice(0, 8)}  — hiding svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} (changes constantly)`);
+        }
         const fresh = !sigwatch.last.has(key);
         sigwatch.last.set(key, hex);
-        const line = `${new Date().toTimeString().slice(0, 8)}  ${fresh ? '(new) ' : ''}svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`;
-        sigwatch.log.push(line); if (sigwatch.log.length > 220) sigwatch.log.shift();
-        sigwatch.send({ watching: 'live', kind: 'watch', total: sigwatch.log.length, lines: sigwatch.log.slice() });
+        push(`${new Date().toTimeString().slice(0, 8)}  ${fresh ? '(new) ' : ''}svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`);
     }
     function onEvent(line) {
         const w = line.split(' '), svc = parseInt(w[1], 16), ev = parseInt(w[2], 16);
@@ -1058,7 +1065,7 @@ function main() {
             // finer mode signal than the cluster-view one we already read. Read-only.
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
             if (q.phase === 'start') {
-                sigwatch = { last: new Map(), log: [], send };
+                sigwatch = { last: new Map(), log: [], rate: new Map(), noisy: new Set(), send };
                 for (let base = 0x8000; base < 0x8100; base += 0x20) {    // broaden 0xb519 across its getter range, 32 events a line
                     const evs = []; for (let e = base; e < base + 0x20; e++) evs.push('0x' + e.toString(16));
                     hmi(`sub 0xb519 1 1 1 ${evs.join(' ')}`);
