@@ -983,7 +983,7 @@ function main() {
     const clients = new Set();
     let scanning = false, watching = false;
     const rec = finder.recorder({ dir: path.dirname(CTL) });
-    const watch = finder.watcher({ always: ['B78_B6_FE_59_EB_74.Message139'] });
+    const watch = finder.watcher({ dir: path.dirname(CTL) });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,

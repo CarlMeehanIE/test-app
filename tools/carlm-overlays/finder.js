@@ -143,26 +143,26 @@ function testRecord(done) {
     // the markers are set 1 s apart at least: find -newer compares whole seconds on some filesystems
 }
 
-/* ---- watch: log the VALUE of each cached SOME/IP signal as it changes while the user cycles drive settings ----
- * Scoped to /var/opt/public/con (the signal cache, where Record #1 found the drive-mode file). The earlier try
- * watched too wide and judged "noise" by file timestamp, so the drive-mode cache - which the unit rewrites on a
- * heartbeat - got thrown out with all the other con files. This judges noise by VALUE: during the quiet window a
- * file is noise only if its CONTENT changes on its own; a heartbeat that rewrites the same bytes is kept. Then it
- * logs a file only when its value actually changes (so heartbeats stay silent), reading only files whose mtime
- * moved. `always` basenames are never treated as noise (the known drive-mode file). Read-only. */
-const WATCH_CON = '/var/opt/public/con';
-const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 1500, WATCH_CAP = 96, WATCH_MAX_LOG = 180;
+/* ---- watch: log the VALUE of each cached signal as it changes while the user cycles drive settings ----
+ * Lesson from two misses: ANY "noise" guess risks throwing out the heartbeating drive-mode cache. So no guessing.
+ * Detect changes with Record's proven, filesystem-wide `find -newer <marker>` (rooted at /var/opt/public - this
+ * already enumerated and read real values). Hide only obvious app data by EXTENSION (.db/.log/.json... - the speech
+ * db, trip json, service log we saw). Log a file only when its VALUE changes (a heartbeat rewriting the same bytes
+ * stays silent). Nothing is pre-excluded by behaviour, so the drive-mode file cannot be lost; if a live counter
+ * exists it just adds lines we can ignore. Record #1 showed con/ is quiet bar the drive-mode file. Read-only. */
+const WATCH_ROOT = '/var/opt/public';
+const WATCH_QUIET_MS = 8000, WATCH_EVERY_MS = 2000, WATCH_CAP = 96, WATCH_MAX_LOG = 300;
+const WATCH_SKIP = /\.(db|db-journal|wal|shm|sqlite|log|json|txt|xml|ini|cfg|yaml|yml|tmp|lock|bak)$|ECRYPTFS|\/carlm-overlays\//i;
 function watcher(o) {
     o = o || {};
-    const wdir = o.watchDir || WATCH_CON;
+    const dir = o.dir || '/run/carlm-overlays', root = o.root || WATCH_ROOT;
     const quiet = o.quietMs || WATCH_QUIET_MS, every = o.intervalMs || WATCH_EVERY_MS;
     const cap = o.maxBytes || WATCH_CAP, maxLog = o.maxLog || WATCH_MAX_LOG;
-    const always = new Set(o.always || []);
-    let noise = new Set(), last = new Map(), log = [], onCh = null, timer = null, busy = false;
+    const mark = path.join(dir, 'finder-watch-mark');
+    let last = new Map(), log = [], onCh = null, timer = null, busy = false;
 
-    const listF = () => { try { return fs.readdirSync(wdir).map((n) => path.join(wdir, n)); } catch (e) { return []; } };
-    const base = (p) => p.replace(/.*\//, '');
-    const mtimeOf = (p) => { try { const s = fs.statSync(p); return s.isFile() ? s.mtimeMs : null; } catch (e) { return null; } };
+    const touch = (f) => fs.writeFileSync(f, `${Date.now()}\n`);
+    const shortp = (p) => p.replace(/^\/var\/opt\/public\//, '').replace(/.*\/con\//, 'con/');
     const valueOf = (p) => {
         try {
             const b = fs.readFileSync(p);
@@ -172,39 +172,33 @@ function watcher(o) {
             return b.slice(0, cap).toString('hex');
         } catch (e) { return `(can't read: ${e.code || 'err'})`; }
     };
-    const note = (tag, p, v) => {
-        const line = `${new Date().toTimeString().slice(0, 8)}  ${tag}con/${base(p)} = ${v}`;
-        log.push(line); if (log.length > maxLog) log.shift();
-        if (onCh) onCh(line, log.length, log.slice());
+    const note = (line) => { log.push(line); if (log.length > maxLog) log.shift(); if (onCh) onCh(line, log.length, log.slice()); };
+    const changedSinceMark = (cb) => {
+        const args = [root, '(', '-path', '*ECRYPTFS_*', '-prune', ')', '-o', '(', '-type', 'f', '-newer', mark, '-print', ')'];
+        execFile('find', args, { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => cb(e && e.code === 'ENOENT' ? e : null, String(out || '').split('\n').filter(Boolean)));
     };
 
     function tick() {
         if (busy) return;
         busy = true;
-        try {
-            for (const p of listF()) {
-                const mt = mtimeOf(p);
-                if (mt === null) continue;
-                const prev = last.get(p);
-                if (prev && prev.mt === mt) continue;                 // mtime unmoved -> value unmoved, skip the read
-                const v = valueOf(p);
-                if (noise.has(p)) { last.set(p, { mt, v }); continue; }
-                if (prev && prev.v === v) { last.set(p, { mt, v }); continue; }   // rewritten with the same value
-                const fresh = !prev;
-                last.set(p, { mt, v });
-                note(fresh ? '(new) ' : '', p, v);
-            }
-        } finally { busy = false; }
+        changedSinceMark((e, files) => {
+            try {
+                if (!e) for (const p of files) {
+                    if (p === mark || WATCH_SKIP.test(p)) continue;
+                    const v = valueOf(p);
+                    if (last.get(p) === v) continue;                    // same value (heartbeat): stay silent
+                    last.set(p, v);
+                    note(`${new Date().toTimeString().slice(0, 8)}  ${shortp(p)} = ${v}`);
+                }
+                try { touch(mark); } catch (te) { /* keep going */ }
+            } finally { busy = false; }
+        });
     }
     return {
         start(onReady, onChange) {
-            onCh = onChange; noise = new Set(); last = new Map(); log = []; busy = false;
-            const a = new Map(); for (const p of listF()) a.set(p, valueOf(p));
-            setTimeout(() => {
-                for (const p of listF()) { const v = valueOf(p), mt = mtimeOf(p); if (a.has(p) && a.get(p) !== v && !always.has(base(p))) noise.add(p); last.set(p, { mt, v }); }
-                onReady(null, noise.size);
-                timer = setInterval(tick, every);
-            }, quiet);
+            onCh = onChange; last = new Map(); log = []; busy = false;
+            try { touch(mark); } catch (e) { return onReady(e); }
+            setTimeout(() => { try { touch(mark); } catch (te) { /* none */ } onReady(null, 0); timer = setInterval(tick, every); }, quiet);
         },
         stop(cb) { if (timer) clearInterval(timer); timer = null; cb(log.slice()); }
     };
