@@ -204,5 +204,44 @@ function watcher(o) {
     };
 }
 
-module.exports = { scan, lines, WORDS, recorder, watcher, rankFiles, test, testRecord };
+/* ---- two-tap snapshot diff of the con signal cache (what the Finder's Watch now uses) ----
+ * conSnapshot enumerates /var/opt/public/con with Record's proven `find` and reads each file's value; conDiff lists
+ * what changed between two snapshots. No heuristics, no timing - just "here are the con files + values now", so a
+ * baseline tap then a Stop tap after a mode change shows exactly which file is the drive mode, before -> after.
+ * Read-only. */
+const CON_DIR = '/var/opt/public/con';
+function readValue(p, cap) {
+    cap = cap || 96;
+    try {
+        const b = fs.readFileSync(p);
+        if (!b.length) return '(empty)';
+        const head = b.slice(0, cap).toString('latin1');
+        if (/^[\x09\x0a\x0d\x20-\x7e]*$/.test(head)) return `"${b.slice(-cap).toString('utf8').replace(/\s+/g, ' ').trim().slice(-72)}"`;
+        return b.slice(0, cap).toString('hex');
+    } catch (e) { return `(can't read: ${e.code || 'err'})`; }
+}
+function conSnapshot(cb, dir) {
+    dir = dir || CON_DIR;
+    execFile('find', [dir, '-maxdepth', '1', '-type', 'f', '-print'], { timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (e, out) => {
+        const files = String(out || '').split('\n').filter(Boolean);
+        const vals = new Map();
+        let readable = 0, unreadable = 0;
+        for (const p of files) { const v = readValue(p); vals.set(p, v); if (/^\(can't read/.test(v)) unreadable++; else readable++; }
+        const dirErr = e && /No such file|not found/i.test(String(e.message || '')) ? 'con dir not found' : (e && e.code === 'ENOENT' ? 'find missing' : null);
+        cb({ vals, count: files.length, readable, unreadable, dirErr });
+    });
+}
+function conDiff(base, now) {
+    const lines = [], names = new Set([...base.vals.keys(), ...now.vals.keys()]);
+    for (const p of names) {
+        const a = base.vals.get(p), b = now.vals.get(p), short = p.replace(/.*\/con\//, 'con/');
+        if (a === b) continue;
+        if (a === undefined) lines.push(`(new) ${short} = ${b}`);
+        else if (b === undefined) lines.push(`(gone) ${short}`);
+        else lines.push(`${short}: ${a} -> ${b}`);
+    }
+    return lines;
+}
+
+module.exports = { scan, lines, WORDS, recorder, watcher, conSnapshot, conDiff, readValue, rankFiles, test, testRecord };
 if (require.main === module) { test(); testRecord(() => console.log('finder record self-check ok')); }

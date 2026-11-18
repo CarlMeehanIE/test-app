@@ -981,9 +981,8 @@ function main() {
 
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
-    let scanning = false, watching = false;
+    let scanning = false, watchBase = null;
     const rec = finder.recorder({ dir: path.dirname(CTL) });
-    const watch = finder.watcher({ dir: path.dirname(CTL) });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
@@ -1043,25 +1042,28 @@ function main() {
                     path.join(path.dirname(DATA), 'finder-record.txt'));
             }
         } else if (q.op === 'watch' && (q.phase === 'start' || q.phase === 'stop')) {
-            // the Finder's Watch: log each cached signal's VALUE as it changes while the user cycles the drive mode
+            // the Finder's Watch (now a two-tap snapshot diff + diagnostics): tap once to grab a baseline of the con
+            // signal cache, change the drive mode, tap Stop to see exactly which con file changed and before -> after.
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
+            const KF = '/var/opt/public/con/B78_B6_FE_59_EB_74.Message139';
             if (q.phase === 'start') {
-                if (watching) return;
-                watching = true;
-                send({ watching: 'quiet' });
-                log('finder: watching, quiet window');
-                watch.start((e, n) => {
-                    if (e) { watching = false; log('finder: ' + e.message); send({ error: e.message }); return; }
-                    log(`finder: watching live (${n} noisy files left out)`);
-                    send({ watching: 'live', kind: 'watch', noise: n, total: 0, lines: [] });
-                }, (line, total, lines) => send({ watching: 'live', kind: 'watch', total, lines }));
+                finder.conSnapshot((snap) => {
+                    watchBase = snap;
+                    const kfv = fs.existsSync(KF) ? finder.readValue(KF) : '(not present now)';
+                    log(`finder: watch baseline (${snap.count} con files, ${snap.readable} readable)`);
+                    send({ watching: 'live', kind: 'watch', total: 0, lines: [
+                        `con: ${snap.count} files${snap.dirErr ? ' - ' + snap.dirErr : ''}, ${snap.readable} readable, ${snap.unreadable} not`,
+                        `known B78_..Message139 = ${kfv}`,
+                        'baseline captured - now change the drive mode (one or several), then tap Stop',
+                    ] });
+                });
             } else {
-                if (!watching) return;
-                watch.stop((lines) => {
-                    watching = false;
-                    log(`finder: watch stopped (${lines.length} value changes)`);
-                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
-                    send({ kind: 'watch', total: lines.length, lines });
+                if (!watchBase) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then change the mode, then Stop'] }); }
+                else finder.conSnapshot((snap) => {
+                    const diff = finder.conDiff(watchBase, snap);
+                    log(`finder: watch diff (${diff.length} con files changed)`);
+                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${diff.join('\n')}\n`); } catch (we) { /* none */ }
+                    send({ kind: 'watch', total: diff.length, lines: diff.length ? diff : [`no con file changed between the two taps (con had ${snap.count} files, ${snap.readable} readable)`] });
                 });
             }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
