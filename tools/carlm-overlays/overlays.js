@@ -1160,6 +1160,15 @@ function main() {
             const tryRead = (cands) => { for (const p of cands) { try { return { p, t: fs.readFileSync(p, 'utf8') }; } catch (e) { /* next */ } } return null; };
             const out = [];
             try {
+                // (0) saved shortcut slots: the state/applet of each screen a hold has captured. Hold a slot on the OEM
+                //     drive-mode screen, then Scan, and its ids show here - what a standalone opener app needs.
+                out.push('=== saved shortcut slots (hold a slot on the OEM drive screen, then read here) ===');
+                slots.forEach((s, i) => {
+                    if (!s) { out.push(`slot ${i}: (empty)`); return; }
+                    if (s.app) out.push(`slot ${i}: app ${s.app}  state ${s.state}  offset ${s.offset}`);
+                    else out.push(`slot ${i}: BMW screen  state ${s.state}  applet ${s.applet}${iconName(s.icon) ? '  icon ' + iconName(s.icon) : ''}`);
+                });
+                Object.keys(learned || {}).forEach((k) => out.push(`learned "${k}": state ${learned[k].state} applet ${learned[k].applet}`));
                 // (A) service-id -> name map
                 const hmi = tryRead(['/etc/vsomeip/hmi.json', '/etc/vsomeip/vsomeip.json', '/opt/etc/vsomeip/hmi.json']);
                 if (hmi) {
