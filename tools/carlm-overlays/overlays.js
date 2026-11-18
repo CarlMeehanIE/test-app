@@ -763,8 +763,18 @@ function main() {
         redrawAll();
         push();
     }
+    function sigLog(svc, ev, hex) {                      // the Finder's signal watch: log each live signal as its value changes
+        const key = `${svc},${ev}`;
+        if (sigwatch.last.get(key) === hex) return;      // only a NEW value for this signal
+        const fresh = !sigwatch.last.has(key);
+        sigwatch.last.set(key, hex);
+        const line = `${new Date().toTimeString().slice(0, 8)}  ${fresh ? '(new) ' : ''}svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`;
+        sigwatch.log.push(line); if (sigwatch.log.length > 220) sigwatch.log.shift();
+        sigwatch.send({ watching: 'live', kind: 'watch', total: sigwatch.log.length, lines: sigwatch.log.slice() });
+    }
     function onEvent(line) {
         const w = line.split(' '), svc = parseInt(w[1], 16), ev = parseInt(w[2], 16);
+        if (sigwatch) sigLog(svc, ev, w[3]);
         if (svc === MDRIVE && ev === shift.DME.ev) sl.dme(w[3]);
         else if (svc === MDRIVE) mSetup(ev, w[3]);
         else if (svc === VEHICLE2 && ev === KOMBI_EV) kombi(w[3]);
@@ -981,7 +991,7 @@ function main() {
 
     /* the control panel (the Overlays app): JSON lines; every change is pushed to every client */
     const clients = new Set();
-    let scanning = false, watchBase = null;
+    let scanning = false, sigwatch = null;
     const rec = finder.recorder({ dir: path.dirname(CTL) });
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
@@ -1042,22 +1052,25 @@ function main() {
                     path.join(path.dirname(DATA), 'finder-record.txt'));
             }
         } else if (q.op === 'watch' && (q.phase === 'start' || q.phase === 'stop')) {
-            // the Finder's Watch (two-tap diff over ALL of /var/opt, not just con): tap to set a baseline, change the
-            // drive mode, tap Stop to see every file that changed and its value. con/ turned out to be the wrong place.
+            // the Finder's Watch (now a LIVE SIGNAL watch): the cluster layout changes with the drive mode, and the
+            // cluster signals ride the bus the tool already listens on - so log each live signal's value as it changes
+            // while the user cycles modes. Also cast a wide net on Vehicle2 (0xB519, the cluster service) to catch a
+            // finer mode signal than the cluster-view one we already read. Read-only.
             const send = (m) => { const l = JSON.stringify({ finder: m }) + '\n'; clients.forEach((x) => x.write(l)); };
-            const WMARK = path.join(path.dirname(DATA), 'finder-watch-mark');
             if (q.phase === 'start') {
-                try { fs.writeFileSync(WMARK, `${Date.now()}\n`); watchBase = WMARK; } catch (e) { log('finder: watch mark: ' + e.message); send({ error: e.message }); return; }
-                log('finder: watch baseline set (/var/opt)');
-                send({ watching: 'live', kind: 'watch', total: 0, lines: ['baseline set across /var/opt - now change the drive mode (one or several), then tap Stop'] });
+                sigwatch = { last: new Map(), log: [], send };
+                for (let base = 0x8000; base < 0x8100; base += 0x20) {    // broaden 0xb519 across its getter range, 32 events a line
+                    const evs = []; for (let e = base; e < base + 0x20; e++) evs.push('0x' + e.toString(16));
+                    hmi(`sub 0xb519 1 1 1 ${evs.join(' ')}`);
+                }
+                log('finder: signal watch on (broadened 0xb519)');
+                send({ watching: 'live', kind: 'watch', total: 0, lines: ['watching the live cluster signals - now cycle the drive modes slowly (pause on each), then tap Stop'] });
             } else {
-                if (!watchBase) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then change the mode, then Stop'] }); }
-                else finder.changedValues(watchBase, (r) => {
-                    const lines = r.lines.slice(0, 80).concat(r.enc ? [`(+${r.enc} encrypted files also changed - can't read their values)`] : []);
-                    log(`finder: watch diff (${r.lines.length} readable, ${r.enc} encrypted changed)`);
-                    try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${lines.join('\n')}\n`); } catch (we) { /* none */ }
-                    send({ kind: 'watch', total: lines.length, lines: lines.length ? lines : ['nothing changed under /var/opt between the two taps'] });
-                });
+                if (!sigwatch) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then cycle the modes, then Stop'] }); return; }
+                const out = sigwatch.log.slice(); sigwatch = null;
+                log(`finder: signal watch off (${out.length} value changes)`);
+                try { fs.writeFileSync(path.join(path.dirname(DATA), 'finder-watch.txt'), `${new Date().toISOString()}\n${out.join('\n')}\n`); } catch (we) { /* none */ }
+                send({ kind: 'watch', total: out.length, lines: out.length ? out : ['no live signals changed - try again on the home/driving screen, or the layout may be driven off-bus'] });
             }
         } else if (q.op === 'scan') {                  // the Finder page: read-only search of the unit's config files
             if (scanning) return;
