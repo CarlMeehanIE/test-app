@@ -777,7 +777,13 @@ function main() {
             return push(`${new Date().toTimeString().slice(0, 8)}  — hiding svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} (changes constantly)`);
         }
         sigwatch.last.set(key, hex);
-        push(`${new Date().toTimeString().slice(0, 8)}  svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`);
+        let hint = '';
+        if (sigwatch.fes && sigwatch.fes.has(svc)) {
+            const n = parseInt(hex, 16);
+            const M = ['Sport', 'Sport+', 'Sport Indiv', 'Comfort', 'Comfort+', 'Comfort Indiv', 'Eco Pro', 'Eco Pro+', 'Eco Pro Indiv', 'Adaptive'];
+            if (hex.replace(/^0x/, '').length <= 2 && n >= 1 && n <= 10) hint = `   ← FES? ${M[n - 1]}`;
+        }
+        push(`${new Date().toTimeString().slice(0, 8)}  svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}${hint}`);
     }
     function onEvent(line) {
         const w = line.split(' '), svc = parseInt(w[1], 16), ev = parseInt(w[2], 16);
@@ -1096,14 +1102,40 @@ function main() {
                     watchChild.on('error', (e) => { if (sigwatch && !sigwatch.discoSeen.has('watch: ' + e.message)) { sigwatch.discoSeen.add('watch: ' + e.message); sigwatch.disco.push('watch failed to start: ' + e.message); } });
                     watchChild.on('exit', (c) => { log('hmictl watch exited ' + c); });
                 } catch (we) { log('hmictl watch: ' + we.message); }
-                // (2) signals: broaden the KNOWN services across their getter ranges, each with its own eventgroup(s)
-                const wide = (svc, grp, hi) => { for (let base = 0x8000; base < hi; base += 0x20) { const evs = []; for (let e = base; e < base + 0x20 && e < hi; e++) evs.push('0x' + e.toString(16)); hmi(`sub 0x${svc.toString(16)} 1 1 ${grp} ${evs.join(' ')}`); } };
-                wide(0xb519, 1, 0x8200);   // cluster/Vehicle2 - extend past 0x80FF this time
-                wide(0xb51f, 1, 0x8100);   // M / MDrive
-                wide(0xb513, 1, 0x8100);   // powertrain
-                [1, 2, 3].forEach((g) => wide(0x1531, g, 0x8100));   // vehicle condition - eventgroup unknown, try 1/2/3
-                log('finder: watch on (discovery + broadened signals)');
-                send({ watching: 'live', kind: 'watch', total: 0, lines: ['probing… give it ~5 s to list services, then cycle the drive modes slowly (pause on each), then tap Stop'] });
+                // (2) RESOLVE the FES / drive-mode service id from the unit's own catalogs (what the installer reads),
+                //     so we subscribe to the RIGHT service, not just the cluster. Then sweep candidates + known services.
+                const info = [];
+                const candset = new Set([0xb519, 0xb51f, 0xb513, 0x1531, 0x1536, 0xb521]);  // known + DrivingDynamics guess
+                const tryRead = (cs) => { for (const p of cs) { try { return { p, t: fs.readFileSync(p, 'utf8') }; } catch (e) { /* next */ } } return null; };
+                try {
+                    const cat = tryRead(['/etc/oap/someip/someip-interfaces.json', '/etc/oap/someip-interfaces.json', '/opt/oap/someip/someip-interfaces.json']);
+                    if (cat) {
+                        const addNear = (term) => {
+                            const i = cat.t.indexOf(term);
+                            if (i < 0) { info.push(`catalog "${term}": not found`); return; }
+                            const w = cat.t.slice(Math.max(0, i - 1800), i + 1800), ids = new Set();
+                            let m; const re = /0x([0-9a-fA-F]{3,4})\b|"service(?:Id)?"\s*:\s*"?(\d{4,6})"?|"id"\s*:\s*"?(\d{4,6})"?/g;
+                            const band = (v) => (v >= 0x1500 && v <= 0x15ff) || (v >= 0xb500 && v <= 0xb5ff);   // BMW infotainment service-id bands
+                            while ((m = re.exec(w))) { const v = m[1] ? parseInt(m[1], 16) : parseInt(m[2] || m[3], 10); if (band(v)) ids.add(v); }
+                            [...ids].slice(0, 12).forEach((v) => candset.add(v));
+                            info.push(`catalog "${term}" → svc ${[...ids].map((v) => '0x' + v.toString(16)).join(' ') || '(none in window)'}`);
+                        };
+                        addNear('drivingexcitement.FES'); addNear('statusFESVehicleDynamicSwitchHMI'); addNear('misc.MDrive');
+                    } else info.push('catalog: not found (using known candidates)');
+                    const hmi = tryRead(['/etc/vsomeip/hmi.json', '/opt/etc/vsomeip/hmi.json']);
+                    if (hmi) {
+                        let m; const re = /"service"\s*:\s*"?(0x[0-9a-fA-F]+|\d+)"?[^}]{0,90}?"name"\s*:\s*"([^"]+)"|"name"\s*:\s*"([^"]+)"[^}]{0,90}?"service"\s*:\s*"?(0x[0-9a-fA-F]+|\d+)"?/g;
+                        while ((m = re.exec(hmi.t))) { const id = m[1] || m[4], nm = m[2] || m[3]; if (id && nm && /driv|dynam|\bfes\b|excit|experien|fahr/i.test(nm)) { const v = /^0x/.test(id) ? parseInt(id, 16) : parseInt(id, 10); if (((v >= 0x1500 && v <= 0x15ff) || (v >= 0xb500 && v <= 0xb5ff))) { candset.add(v); info.push(`hmi.json: ${nm} = 0x${v.toString(16)}`); } } }
+                    }
+                } catch (e) { info.push('catalog read error: ' + e.message); }
+                sigwatch.fes = candset;                        // sigLog adds a FES mode hint for these services
+                sigwatch.disco.push('arming (~15s) — then cycle ALL six modes slowly, pausing on each; watch for a line ending "← FES?", then Stop');
+                info.forEach((x) => sigwatch.disco.push(x));
+                // (3) subscribe each candidate across the likely eventgroups and getter range; the mode event will deliver
+                const grps = [1, 2, 3, 7];
+                for (const svc of candset) for (const grp of grps) for (let base = 0x8000; base < 0x8100; base += 0x20) { const evs = []; for (let e = base; e < base + 0x20; e++) evs.push('0x' + e.toString(16)); hmi(`sub 0x${svc.toString(16)} 1 1 ${grp} ${evs.join(' ')}`); }
+                log(`finder: watch on (candidates: ${[...candset].map((v) => '0x' + v.toString(16)).join(' ')})`);
+                send({ watching: 'live', kind: 'watch', total: sigwatch.disco.length, lines: compose() });
             } else {
                 if (!sigwatch) { send({ kind: 'watch', total: 0, lines: ['tap Watch first, then cycle the modes, then Stop'] }); return; }
                 if (watchChild) { try { watchChild.kill(); } catch (ke) { /* gone */ } watchChild = null; }
