@@ -766,7 +766,8 @@ function main() {
     function sigLog(svc, ev, hex) {                      // the Finder's signal watch: log each live signal as its value changes
         const key = `${svc},${ev}`;
         if (sigwatch.noisy.has(key)) return;             // a telemetry signal (speed/rpm/…) we've already hidden
-        if (sigwatch.last.get(key) === hex) return;      // only a NEW value for this signal
+        if (!sigwatch.last.has(key)) { sigwatch.last.set(key, hex); return; }   // seed the baseline SILENTLY - only log real changes
+        if (sigwatch.last.get(key) === hex) return;      // unchanged
         const now = Date.now(), hist = sigwatch.rate.get(key) || [];
         hist.push(now); while (hist.length && hist[0] < now - 2000) hist.shift();
         sigwatch.rate.set(key, hist);
@@ -775,9 +776,8 @@ function main() {
             sigwatch.noisy.add(key);
             return push(`${new Date().toTimeString().slice(0, 8)}  — hiding svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} (changes constantly)`);
         }
-        const fresh = !sigwatch.last.has(key);
         sigwatch.last.set(key, hex);
-        push(`${new Date().toTimeString().slice(0, 8)}  ${fresh ? '(new) ' : ''}svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`);
+        push(`${new Date().toTimeString().slice(0, 8)}  svc 0x${svc.toString(16)} ev 0x${ev.toString(16)} = ${hex}`);
     }
     function onEvent(line) {
         const w = line.split(' '), svc = parseInt(w[1], 16), ev = parseInt(w[2], 16);
