@@ -11,28 +11,26 @@ const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 
-const DIRS = ['/etc', '/opt', '/usr/share'];
+const DIRS = ['/etc', '/opt', '/usr/share', '/var/opt'];
 const INCLUDE = ['*.json', '*.xml', '*.fdepl', '*.fidl', '*.conf', '*.ini', '*.cfg', '*.properties'];
-// the drive-dynamics words: the Driving Experience switch (Fahrerlebnisschalter), its modes (Comfort / Sport / Sport+
-// / Sport Individual / Eco Pro) and the four systems it sets (steering, drivetrain / powertrain, transmission,
-// damping / adaptive). BMW's config is mostly German, so both languages, and compounds over bare words to keep the
-// noise down.
-const WORDS = 'fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|drivingdynamic|driving_dynamic|drivedynamic|drive_dynamic|' +
-    'drivingexperience|driving_experience|drivemode|drive_mode|drivetrainswitch|drivetrain_switch|' +
-    'ecopro|eco_pro|sportindividual|sport_individual|sport_plus|adaptivemode|adaptive_mode|' +
-    'servotronic|lenkungskennlinie|daempfer|dampfer|damper|verstelldaempfer|edck|vdc|' +
-    'antriebsstrang|getriebekennlinie|efahrerlebnis|dynamicdrive';
-const MAX_LINES = 400, KEEP = 200, TIMEOUT_MS = 60000;
+// The drive-dynamics words found nothing - the service isn't named that way. So dump the SOME/IP service CATALOG
+// instead: CommonAPI interface definitions (named), their service ids, and the vsomeip service/instance entries.
+// score() floats any drive-dynamics-named interface to the top; the rest is the full list to identify it from.
+const WORDS = 'interface [A-Za-z][A-Za-z0-9_]*|managed [A-Za-z][A-Za-z0-9_]*|SomeIpServiceID|SomeIpInstanceID|' +
+    '"service" *:|"instance" *:|ProvidedInstance|fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|' +
+    'driv(ing|e)[a-z_]*dynamic|driv(ing|e)[a-z_]*experience|drive[a-z_]*mode|drivetrain|chassis|dynamicdrive|' +
+    'servotronic|d[ae]mpfer|sportindividual|ecopro';
+const MAX_LINES = 600, KEEP = 220, TIMEOUT_MS = 60000;
 
-/* how telling a line is: a service / interface definition with an id, BMW's names, the drive-dynamics words over the
- * generic ones ("damper"); comments last */
+/* how telling a line is: a named interface / service with an id, BMW's names, anything drive-dynamics over the
+ * generic ("damper"); comments last */
 function score(l) {
     const text = l.replace(/^[^:]*:\d+:/, '');
     let n = 0;
-    if (/0x[0-9a-f]{3,4}\b/i.test(text)) n += 3;
-    if (/service|interface|instance|event|method|attribute|broadcast/i.test(text)) n += 3;
+    if (/\b(interface|managed)\s+[A-Za-z]/.test(text)) n += 3;
+    if (/SomeIpServiceID|0x[0-9a-f]{3,4}\b|"service"|"instance"/i.test(text)) n += 3;
     if (/de\.bmw|bmw/i.test(l)) n += 2;
-    if (/fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|driv(ing|e)[_]?(dynamic|experience|mode)|drivetrain|servotronic|d[ae]mpfer|sport[_]?individual|eco[_]?pro/i.test(text)) n += 2;
+    if (/fahrerlebnis|fahrdynamik|fahrmodus|fahrwerk|driv(ing|e)[a-z_]*(dynamic|experience|mode)|drivetrain|chassis|servotronic|d[ae]mpfer|sport[_]?individual|eco[_]?pro|dynamicdrive/i.test(text)) n += 4;
     if (/^\s*(#|\/\/|;|<!--)/.test(text)) n -= 4;
     return n;
 }
