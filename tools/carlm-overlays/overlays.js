@@ -1143,7 +1143,7 @@ function main() {
                 const cat = tryRead(['/etc/oap/someip/someip-interfaces.json', '/etc/oap/someip-interfaces.json', '/opt/oap/someip/someip-interfaces.json']);
                 if (cat) {
                     out.push(`=== ${cat.p} (${cat.t.length} bytes) : FES slices ===`);
-                    const terms = ['drivingexcitement.FES', 'statusFESVehicleDynamicSwitchHMI', 'actualValueModeDrivingExperience'];
+                    const terms = ['drivingexcitement.FES', 'statusFESVehicleDynamicSwitchHMI', 'actualValueModeDrivingExperience', 'misc.MDrive', 'controlDisplayMSystems', 'controlDisplayEngineMode'];
                     for (const tm of terms) {
                         let i = cat.t.indexOf(tm), n = 0;
                         if (i < 0) { out.push(`-- "${tm}": not found --`); continue; }
