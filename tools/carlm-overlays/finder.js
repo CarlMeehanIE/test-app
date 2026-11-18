@@ -12,7 +12,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 
 const DIRS = ['/etc', '/opt', '/usr/share', '/var/opt'];
-const INCLUDE = ['*.json', '*.xml', '*.fdepl', '*.fidl', '*.conf', '*.ini', '*.cfg', '*.properties'];
+const INCLUDE = ['*.json', '*.xml', '*.fdepl', '*.fidl', '*.conf', '*.ini', '*.cfg', '*.properties', '*.yaml', '*.yml', 'vsomeip*', 'commonapi*'];
 // The drive-dynamics words found nothing - the service isn't named that way. So dump the SOME/IP service CATALOG
 // instead: CommonAPI interface definitions (named), their service ids, and the vsomeip service/instance entries.
 // score() floats any drive-dynamics-named interface to the top; the rest is the full list to identify it from.
@@ -38,7 +38,7 @@ function score(l) {
  * most telling first (stable: file order within a score) */
 function lines(out) {
     return String(out || '').split('\n').filter(Boolean)
-        .filter((l) => !/\/(carlm-overlays|iteriodev[-_]|oap_\d+|fonts?)\//i.test(l))
+        .filter((l) => !/\/(carlm-overlays|fonts?)\//i.test(l))
         .map((l, i) => ({ l: l.replace(/\s+/g, ' ').slice(0, KEEP), s: score(l), i }))
         .sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.l);
 }
@@ -51,9 +51,21 @@ function scan(cb, o) {
         // grep: 0 found, 1 nothing, 2 some dirs unreadable (results still good); a missing grep or a timeout: an error
         if (e && (e.code === 'ENOENT' || e.killed)) return cb(new Error(e.code === 'ENOENT' ? 'no grep on this unit' : 'scan took too long'));
         const all = lines(out);
-        const res = { at: new Date().toISOString(), total: all.length, lines: all.slice(0, MAX_LINES), file: file || null };
-        if (file) { try { fs.writeFileSync(file, `${res.at}\n${all.join('\n')}\n`); } catch (we) { res.file = null; } }
-        cb(null, res);
+        if (all.length) {
+            const res = { at: new Date().toISOString(), total: all.length, lines: all.slice(0, MAX_LINES), file: file || null };
+            if (file) { try { fs.writeFileSync(file, `${res.at}\n${all.join('\n')}\n`); } catch (we) { res.file = null; } }
+            return cb(null, res);
+        }
+        // nothing matched: list what config files even exist, so we learn whether there's any readable config at all
+        const nameArgs = [];
+        INCLUDE.forEach((g, i) => { if (i) nameArgs.push('-o'); nameArgs.push('-name', g); });
+        execFile('find', dirs.concat(['-type', 'f', '('], nameArgs, [')']), { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (fe, fout) => {
+            const files = String(fout || '').split('\n').filter(Boolean).filter((l) => !/\/(carlm-overlays|fonts?)\//i.test(l));
+            const header = files.length ? `no service defs matched - ${files.length} config files present, sample:` : `no readable config files found under ${dirs.join(' ')}`;
+            const sample = files.slice(0, 70);
+            if (file) { try { fs.writeFileSync(file, `${header}\n${files.join('\n')}\n`); } catch (we) { /* none */ } }
+            cb(null, { at: new Date().toISOString(), total: sample.length, lines: [header].concat(sample), file: file || null, diag: true });
+        });
     });
 }
 
@@ -61,7 +73,8 @@ function test() {
     const assert = require('assert');
     const got = lines('/etc/vsomeip/hmi.json:12:   "service" : "0xb521", "name": "DrivingDynamics"\n' +
         '/var/opt/carlm-overlays/x.json:1: fahrmodus\n/opt/x/oap_5/rhmi.json:3: Fahrdynamik\n');
-    assert.deepStrictEqual(got, ['/etc/vsomeip/hmi.json:12: "service" : "0xb521", "name": "DrivingDynamics"'], 'ours and the apps\' left out');
+    assert.deepStrictEqual(got, ['/etc/vsomeip/hmi.json:12: "service" : "0xb521", "name": "DrivingDynamics"',
+        '/opt/x/oap_5/rhmi.json:3: Fahrdynamik'], 'ours left out, app configs kept');
     assert.deepStrictEqual(lines('/etc/a.conf:1: # key fahrdynamik notes\n/etc/b.json:2: "service":"0xb521" fahrmodus\n'),
         ['/etc/b.json:2: "service":"0xb521" fahrmodus', '/etc/a.conf:1: # key fahrdynamik notes'], 'a service with an id first, comments last');
     // a real run on this machine's /etc: grep is there, it answers, the result is bounded
