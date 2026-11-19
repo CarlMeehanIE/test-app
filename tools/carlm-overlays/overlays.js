@@ -93,6 +93,7 @@ const SCREENS = [
 const ICON_LIB = [
     ['m-color', 'M'],
     ['m-outline', 'M outline'],
+    ['m-grey', 'M grey'],
     ['android-auto', 'Android Auto'],
     ['android-auto-color', 'Android Auto live'],
     ['media', 'Media'],
@@ -1469,7 +1470,7 @@ function test() {
         ambientHeat: 4, ambientCool: 13 });
     assert.deepStrictEqual(s2, { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 4, ambientCool: 9, order: 'down', side: 'left',
         show: SETTINGS.show, align: SETTINGS.align, mmode: { on: false, m1: 'sport', m2: 'track', off: 'road', start: 'car', car: 'auto' },
-        shift: shift.DEFAULTS });
+        shift: shift.DEFAULTS, driveMode: SETTINGS.driveMode });
     // per-button choice: 'on' shows what the car doesn't report, 'off' hides what it does (an M2 without ventilation that
     // reports it: the client's car, 2026-11-04); bad values are ignored
     const s3 = mergeSettings(S0, { show: { 'driver.cool': 'off', 'passenger.cool': 'off', 'driver.wheel': 'maybe', x: 'on' } });
@@ -1582,7 +1583,7 @@ function test() {
     assert.deepStrictEqual([tt.w, tt.h, tf.w, tf.h], [100, 120, 37, APP_GLYPH]);
     // the shortcut icons are drawn at their final size: 76 px (no scaling, no blur), the glyph about the car's own. A
     // wide left-zone logo (m-color) is the exception: any width, fitted to the icon height at draw time
-    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.h <= 84 && (n === 'm-color' || n === 'm-outline' || im.w <= 84), n); });
+    ICON_LIB.forEach(([n]) => { const im = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'lib', n + '.png'))); assert(im.h <= 84 && (n === 'm-color' || n === 'm-outline' || n === 'm-grey' || im.w <= 84), n); });
     assert.deepStrictEqual([png.fitH({ w: 238, h: 84, data: new Uint8Array(238 * 84 * 4) }, 76).w, png.fitH({ w: 40, h: 40, data: new Uint8Array(40 * 40 * 4) }, 76).w], [215, 40], 'fitH: wide to its height, small left alone');
     const p = pill(150, 120, 10, 20, 1);
     assert.strictEqual(p.data[(60 * 150 + 75) * 4 + 3], 255); assert.strictEqual(p.data[3], 0);
