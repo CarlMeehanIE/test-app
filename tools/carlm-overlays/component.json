@@ -1,7 +1,7 @@
 {
   "id": "carlm-overlays",
   "kind": "tool",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "title": "Overlays",
   "description": "QuickSelect strip (iDrive 8.5 style) in the climate bar: five shortcuts, each with its own icon if picked (tap opens, hold 1 s saves the screen you are on), seat heating / ventilation in the HMI's own spots, steering wheel heating, M1 / M2 switch the M Mode, and a start can too (Road / Sport / Track); each seat / wheel button can be nudged into place (the app's Align page); shift lights on the cluster for cars without their own (not M cars; with Cluster renderer 0.3.6 or newer). Set up in the eOverlays app (carlm_overlays). Own ids, beside IterioDev's iteriodev-overlays: uninstall that one, only one strip can show. Needs Renderer (mgu-render) 0.6.10 or newer.",
   "optional": true,
@@ -323,7 +323,17 @@
       "path": "icons/lib/LICENSE",
       "from": "icons/lib/LICENSE",
       "mode": "0644"
-    }
+    },
+    { "path": "icons/modes/1.png", "from": "icons/modes/1.png", "mode": "0644" },
+    { "path": "icons/modes/2.png", "from": "icons/modes/2.png", "mode": "0644" },
+    { "path": "icons/modes/3.png", "from": "icons/modes/3.png", "mode": "0644" },
+    { "path": "icons/modes/4.png", "from": "icons/modes/4.png", "mode": "0644" },
+    { "path": "icons/modes/5.png", "from": "icons/modes/5.png", "mode": "0644" },
+    { "path": "icons/modes/6.png", "from": "icons/modes/6.png", "mode": "0644" },
+    { "path": "icons/modes/7.png", "from": "icons/modes/7.png", "mode": "0644" },
+    { "path": "icons/modes/8.png", "from": "icons/modes/8.png", "mode": "0644" },
+    { "path": "icons/modes/9.png", "from": "icons/modes/9.png", "mode": "0644" },
+    { "path": "icons/modes/10.png", "from": "icons/modes/10.png", "mode": "0644" }
   ],
   "units": [
     {

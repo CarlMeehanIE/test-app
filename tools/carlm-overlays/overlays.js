@@ -183,7 +183,8 @@ const ALIGN_DEFAULTS = { 'driver.heat': { x: 36, y: -1 }, 'passenger.heat': { x:
 const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, ambientHeat: 3, ambientCool: 9, order: 'up', side: 'left',
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
-    mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS };
+    mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
+    driveMode: { on: true, x: 800, y: 560, w: 320, h: 93 } };
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -195,6 +196,10 @@ const VEHICLE2 = 0xb519, KOMBI_EV = 0x807c, KOMBI_SUB = 'sub 0xb519 1 1 1 0x807c
 // statusConditionVehicle 1 / 2 PARKEN, 3 STANDFUNKTIONEN, 5 WOHNEN (10 FAHREN, 8 / 12 drive-ready coming / going);
 // and the head unit asleep (STR: the process stood still WAKE_MS or longer)
 const VCOND = 0x1531, VCOND_EV = 0x8002, VCOND_SUB = 'sub 0x1531 1 1 2 0x8002', WAKE_MS = 60000;
+// drive mode (Fahrerlebnisschalter): FES 0xb50d, statusFESVehicleDynamicSwitchHMI event 0x8025, payload byte0 = mode 1-10
+// (confirmed live 2026-11-19). Shown on the cluster as an image (text labels now, Carl's icons later, same DM canvas).
+const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140;
+const MODE_NAME = { 1: 'Sport', 2: 'Sport+', 3: 'Sport Individual', 4: 'Comfort', 5: 'Comfort+', 6: 'Comfort Individual', 7: 'Eco Pro', 8: 'Eco Pro+', 9: 'Eco Pro Individual', 10: 'Adaptive' };
 const carOff = (hex) => [1, 2, 3, 5].indexOf(parseInt((hex || '').slice(10, 12), 16)) >= 0;
 const mReset = (m) => { m.sp18 = 0; m.setup = 0; };
 // the ambient light flash when a seat or the wheel heating goes on: ComfortFunctionIuK 0xB512, the 12-colour ambient
@@ -335,6 +340,14 @@ function mergeSettings(cur, p) {
         delete out.mmode.boot;
         ['m1', 'm2', 'off'].forEach((k) => { if (MODES.indexOf(p.mmode[k]) >= 0) out.mmode[k] = p.mmode[k]; });
         if (MCAR.indexOf(p.mmode.car) >= 0) out.mmode.car = p.mmode.car;
+    }
+    if (p.driveMode && typeof p.driveMode === 'object') {
+        if (typeof p.driveMode.on === 'boolean') out.driveMode.on = p.driveMode.on;
+        const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
+        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = clamp(p.driveMode.x, 0, 1920);
+        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = clamp(p.driveMode.y, 0, 720);
+        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 8, 1920);
+        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 8, 720);
     }
     out.shift = shift.mergeSettings(out.shift, p.shift);
     return out;
@@ -792,6 +805,7 @@ function main() {
         else if (svc === MDRIVE) mSetup(ev, w[3]);
         else if (svc === VEHICLE2 && ev === KOMBI_EV) kombi(w[3]);
         else if (svc === VCOND && ev === VCOND_EV) { if (carOff(w[3]) && (m.sp18 || m.setup)) { log(`car off (${w[3]}): no M setup`); mReset(m); } }
+        else if (svc === FES && ev === FES_MODE_EV) sl.mode(w[3]);
         else if (svc === shift.RPM.svc && ev === shift.RPM.ev) sl.rpm(w[3]);
         else if (svc === shift.LIMIT.svc && ev === shift.LIMIT.ev) sl.limit(w[3]);
         else {
@@ -825,11 +839,32 @@ function main() {
      * HUD (a client's M2, 2026-11-05: ours over the map). Off or an M car: no rpm polling, no layer shown */
     const sl = (() => {
         const v = { rpm: 0, limit: null, dme: null, dmeAt: 0, seg: -1, flash: null, shown: {}, vis: { shown: false, lowSince: 0 },
-            renderer: 'missing', layer: '', own: null };
+            renderer: 'missing', layer: '', own: null, dmMode: 0, dmPreview: 0 };
         const own = () => mcarOf(mcar || v.dmeAt > 0, settings);
         const poll = () => hmi(settings.shift.on && !v.own ? shift.RPM.poll : shift.RPM.poll.replace(/ 50 /, ' 0 '));
         let cr = null;
         const layers = {};                            // target -> layer ref
+        let modeLayer = null; const modeCache = {};   // drive-mode indicator image layer (byte0 1-10 -> icons/modes/N.png)
+        const dmRect = () => { const d = settings.driveMode; return { x: d.x, y: d.y, w: d.w, h: d.h }; };
+        const dmCanvas = (img) => {                    // fit the png onto the DM canvas (exact size -> straight through)
+            if (img.w === DM_IW && img.h === DM_IH) return Buffer.from(img.data);
+            const k = Math.min(DM_IW / img.w, DM_IH / img.h), sw = Math.max(1, Math.round(img.w * k)), sh = Math.max(1, Math.round(img.h * k));
+            const s = png.scale(img, sw, sh), out = Buffer.alloc(DM_IW * DM_IH * 4), ox = (DM_IW - sw) >> 1, oy = (DM_IH - sh) >> 1;
+            for (let y = 0; y < sh; y++) s.data.copy(out, ((oy + y) * DM_IW + ox) * 4, y * sw * 4, y * sw * 4 + sw * 4);
+            return out;
+        };
+        const dmBuf = (n) => {
+            if (n in modeCache) return modeCache[n];
+            let b = null;
+            try { b = dmCanvas(png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'modes', n + '.png')))); } catch (e) { log('drive mode image ' + n + ': ' + e.message); }
+            modeCache[n] = b; return b;
+        };
+        const dmShow = () => {
+            if (!cr || !modeLayer) return;
+            const n = v.dmPreview || v.dmMode, b = n ? dmBuf(n) : null;
+            if (b && settings.driveMode.on) { cr.pixels(modeLayer, null, b); cr.set(modeLayer, { visible: 1 }); }
+            else cr.set(modeLayer, { visible: 0 });
+        };
         if (fs.existsSync(CLUSTER)) {
             try {
                 const { ClusterRender } = require(CLUSTER);
@@ -839,12 +874,14 @@ function main() {
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });
                     cr.uniform(layers[t], 'u_seg', [0]); cr.uniform(layers[t], 'u_flash', [0]);
                 });
+                const dr = dmRect();                  // the drive-mode image layer on the cluster face
+                modeLayer = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 });
                 cr.on('layer', (ref, state, reason) => {
                     if (ref === layers.guide) { v.layer = state; push(); }
                     log(`shift lights: ${ref === layers.hud ? 'hud' : 'guide'} layer ${state}${reason ? ` (${reason})` : ''}`);
                 });
                 cr.on('target', (name, state, holder, reason) => log(`shift lights: target ${name} ${state}${reason ? ` (${reason})` : ''}`));
-                cr.on('ready', () => { v.renderer = 'connected'; push(); });
+                cr.on('ready', () => { v.renderer = 'connected'; dmShow(); push(); });
                 cr.on('disconnected', () => { v.renderer = 'not running'; push(); });
                 cr.on('refused', (op, ref, reason) => { v.layer = `refused: ${reason}`; log(`shift lights: ${op} refused: ${reason}`); push(); });
                 cr.connect();
@@ -872,6 +909,11 @@ function main() {
             settings() { v.own = own(); poll(); update(); },
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
+            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmShow(); push(); } },
+            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, 1920], y: [0, 720], w: [8, 1920], h: [8, 720] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayer) cr.set(modeLayer, dmRect()); save(); push(); },
+            dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; dmShow(); push(); },
+            dmOn(flag) { settings.driveMode.on = !!flag; dmShow(); save(); push(); },
+            dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect() }),
             close() { if (cr) cr.close(); },
         };
     })();
@@ -898,6 +940,7 @@ function main() {
         hmi(MDRIVE_SUB);
         hmi(KOMBI_SUB);
         hmi(VCOND_SUB);
+        [1, 2, 3, 7].forEach((g) => hmi(`sub 0x${FES.toString(16)} 1 1 ${g} 0x${FES_MODE_EV.toString(16)}`));   // drive mode (eventgroup unconfirmed; try 1/2/3/7)
         hmi(shift.LIMIT.sub);
         sl.settings();                                // the rpm poll (hmictl's own thread), when the shift lights are on
     }
@@ -1009,7 +1052,7 @@ function main() {
     const has = (s) => ({ heat: s.heat.have, cool: s.cool.have });
     const status = () => ({ state: { settings, slots: slots.map((s) => describe(s, apps)),
         car: { backend: st.backend, seats: { driver: has(st.seats.driver), passenger: has(st.seats.passenger) }, wheel: st.wheel.have,
-            mcar: mEff(), mfound: mcar, setups: m.sp21 ? 2 : 1 }, shift: sl.status(),
+            mcar: mEff(), mfound: mcar, setups: m.sp21 ? 2 : 1 }, shift: sl.status(), driveMode: sl.dmStatus(),
         notice: notice && Date.now() - notice.at < REPAIR_MS ? notice : null, peek: peeking(), aa: aaNow } });
     function push() { const l = JSON.stringify(status()) + '\n'; clients.forEach((c) => c.write(l)); }
     function targets() {
@@ -1028,6 +1071,12 @@ function main() {
             settings = mergeSettings(settings, q.settings);
             save(); redrawAll(); push();
             if (settings.shift.on !== was) sl.settings(); else sl.tick();
+        } else if (q.op === 'dmAlign' && q.rect && typeof q.rect === 'object') {
+            sl.dmAlign(q.rect);                       // Cluster align page: move/resize the drive-mode indicator live
+        } else if (q.op === 'dmPreview') {
+            sl.dmPreview(+q.mode || 0);               // show a sample mode while aligning (0 = back to the live mode)
+        } else if (q.op === 'dmOn') {
+            sl.dmOn(!!q.on);
         } else if (q.op === 'slot' && Number.isInteger(q.i) && q.i >= 0 && q.i < SLOTS && slotOk(q.target)) {
             const t = q.target, sl = t.app ? { app: t.app, state: t.state, offset: t.offset } : { state: t.state, applet: t.applet };
             const scr = !t.app && screenList().find((x) => x.state === t.state && x.applet === t.applet);
