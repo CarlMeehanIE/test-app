@@ -847,14 +847,19 @@ function main() {
         const modeL = {};                             // mode enum -> { ref, w, h }: lazily-created image layers, each the mode PNG's native size
         let dmTimer = null;                           // the active flash animation (setInterval)
         let dmPending = null;                         // the delay before a flash starts (lets the cluster's view-switch settle)
-        const dmLayer = (n) => {                       // create (once) the image layer for mode n and upload its pixels
-            if (n in modeL) return modeL[n];
-            if (!cr) return null;
+        let viewEpoch = 0;                            // bumped on every cluster view switch; a layer built in an older epoch was detached when the cluster rebuilt the strip, so it must be recreated
+        const dmDrop = (ref) => { try { if (cr && typeof cr.remove === 'function') cr.remove(ref); else if (cr && typeof cr.destroy === 'function') cr.destroy(ref); } catch (e) { /* no remove api */ } };
+        const dmLayer = (n) => {                       // the image layer for mode n, (re)built on the current surface if stale
+            const c = modeL[n];
+            if (c && c.epoch === viewEpoch) return c;  // fresh enough: reuse
+            if (!cr) return c || null;
+            if (c && c.ref) dmDrop(c.ref);             // stale (a view switch detached it): drop and rebuild on the live surface
             try {
                 const img = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'modes', n + '.png')));
                 const ref = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: 0, y: 0, w: img.w, h: img.h, iw: img.w, ih: img.h, visible: 0 });
                 cr.pixels(ref, null, Buffer.from(img.data));
-                modeL[n] = { ref, w: img.w, h: img.h };
+                modeL[n] = { ref, w: img.w, h: img.h, epoch: viewEpoch };
+                log(`dm layer ${n} built (epoch ${viewEpoch}) ${ref}`);
             } catch (e) { log('drive mode image ' + n + ': ' + e.message); modeL[n] = null; }
             return modeL[n];
         };
@@ -869,8 +874,10 @@ function main() {
             if (!cr || !settings.driveMode.on) return;
             if (dmPending) { clearTimeout(dmPending); dmPending = null; }
             const cross = prev >= 1 && dmGroup(n) !== dmGroup(prev);
+            if (cross) viewEpoch++;                     // the cluster rebuilds the strip on a view switch: our layers from before are stale
             const wait = cross ? Math.max(0, settings.driveMode.delay | 0) : 0;
-            if (wait) dmPending = setTimeout(() => { dmPending = null; dmFlash(n); }, wait);
+            log(`dm trigger ${n} (prev ${prev}) cross=${cross} wait=${wait} epoch=${viewEpoch}`);
+            if (wait) dmPending = setTimeout(() => { dmPending = null; log('dm flash fire ' + n); dmFlash(n); }, wait);
             else dmFlash(n);
         };
         const dmStatic = (n) => {                      // hold a mode still (for the in-car Align page)
@@ -880,7 +887,8 @@ function main() {
         };
         const dmFlash = (n) => {                        // OEM-style transient: fade + drop in, hold, fade + drop out
             if (!cr || !settings.driveMode.on) return;
-            const L = dmLayer(n); if (!L) return;
+            const L = dmLayer(n); if (!L) { log('dm flash ' + n + ': no layer'); return; }
+            log(`dm flash ${n} ${MODE_NAME[n] || ''} ref=${L.ref}`);
             dmStop(); dmHideAll();
             const d = settings.driveMode, drop = (L.h * d.fontPx / DM_BASE) * 0.22, out = drop * 0.6;
             const FI = Math.max(1, d.fadeIn), HO = Math.max(0, d.hold), FO = Math.max(1, d.fadeOut), end = FI + HO + FO, t0 = Date.now();
