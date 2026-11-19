@@ -184,7 +184,7 @@ const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, amb
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
-    driveMode: { on: true, x: 171, y: 54, w: 360, h: 105 } };   // centred in the 702x213 guide target
+    driveMode: { on: true, x: 780, y: 600, w: 360, h: 105 } };   // bottom-centre of the 1920x720 panel (near the status row)
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -198,7 +198,7 @@ const VEHICLE2 = 0xb519, KOMBI_EV = 0x807c, KOMBI_SUB = 'sub 0xb519 1 1 1 0x807c
 const VCOND = 0x1531, VCOND_EV = 0x8002, VCOND_SUB = 'sub 0x1531 1 1 2 0x8002', WAKE_MS = 60000;
 // drive mode (Fahrerlebnisschalter): FES 0xb50d, statusFESVehicleDynamicSwitchHMI event 0x8025, payload byte0 = mode 1-10
 // (confirmed live 2026-11-19). Shown on the cluster as an image (text labels now, Carl's icons later, same DM canvas).
-const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 702, GH = 213;   // GW/GH = cluster-render `guide` target size
+const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 1920, GH = 720;   // GW/GH = cluster-render `panel` target size (whole cluster face)
 const MODE_NAME = { 1: 'Sport', 2: 'Sport+', 3: 'Sport Individual', 4: 'Comfort', 5: 'Comfort+', 6: 'Comfort Individual', 7: 'Eco Pro', 8: 'Eco Pro+', 9: 'Eco Pro Individual', 10: 'Adaptive' };
 const carOff = (hex) => [1, 2, 3, 5].indexOf(parseInt((hex || '').slice(10, 12), 16)) >= 0;
 const mReset = (m) => { m.sp18 = 0; m.setup = 0; };
@@ -874,8 +874,8 @@ function main() {
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });
                     cr.uniform(layers[t], 'u_seg', [0]); cr.uniform(layers[t], 'u_flash', [0]);
                 });
-                const dr = dmRect();                  // the drive-mode image layer on the cluster face
-                modeLayer = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 });
+                const dr = dmRect();                  // the drive-mode image layer on the full cluster face (panel, 1920x720)
+                modeLayer = cr.image({ target: 'panel', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 });
                 cr.on('layer', (ref, state, reason) => {
                     if (ref === layers.guide) { v.layer = state; push(); }
                     log(`shift lights: ${ref === layers.hud ? 'hud' : 'guide'} layer ${state}${reason ? ` (${reason})` : ''}`);
