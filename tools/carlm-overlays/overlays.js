@@ -184,7 +184,7 @@ const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, amb
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
-    driveMode: { on: true, x: 800, y: 560, w: 320, h: 93 } };
+    driveMode: { on: true, x: 171, y: 54, w: 360, h: 105 } };   // centred in the 702x213 guide target
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -198,7 +198,7 @@ const VEHICLE2 = 0xb519, KOMBI_EV = 0x807c, KOMBI_SUB = 'sub 0xb519 1 1 1 0x807c
 const VCOND = 0x1531, VCOND_EV = 0x8002, VCOND_SUB = 'sub 0x1531 1 1 2 0x8002', WAKE_MS = 60000;
 // drive mode (Fahrerlebnisschalter): FES 0xb50d, statusFESVehicleDynamicSwitchHMI event 0x8025, payload byte0 = mode 1-10
 // (confirmed live 2026-11-19). Shown on the cluster as an image (text labels now, Carl's icons later, same DM canvas).
-const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140;
+const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 702, GH = 213;   // GW/GH = cluster-render `guide` target size
 const MODE_NAME = { 1: 'Sport', 2: 'Sport+', 3: 'Sport Individual', 4: 'Comfort', 5: 'Comfort+', 6: 'Comfort Individual', 7: 'Eco Pro', 8: 'Eco Pro+', 9: 'Eco Pro Individual', 10: 'Adaptive' };
 const carOff = (hex) => [1, 2, 3, 5].indexOf(parseInt((hex || '').slice(10, 12), 16)) >= 0;
 const mReset = (m) => { m.sp18 = 0; m.setup = 0; };
@@ -344,10 +344,10 @@ function mergeSettings(cur, p) {
     if (p.driveMode && typeof p.driveMode === 'object') {
         if (typeof p.driveMode.on === 'boolean') out.driveMode.on = p.driveMode.on;
         const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
-        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = clamp(p.driveMode.x, 0, 1920);
-        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = clamp(p.driveMode.y, 0, 720);
-        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 8, 1920);
-        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 8, 720);
+        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = clamp(p.driveMode.x, 0, GW);
+        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = clamp(p.driveMode.y, 0, GH);
+        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 8, GW);
+        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 8, GH);
     }
     out.shift = shift.mergeSettings(out.shift, p.shift);
     return out;
@@ -910,7 +910,7 @@ function main() {
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
             mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmShow(); push(); } },
-            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, 1920], y: [0, 720], w: [8, 1920], h: [8, 720] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayer) cr.set(modeLayer, dmRect()); save(); push(); },
+            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, GW], y: [0, GH], w: [8, GW], h: [8, GH] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayer) cr.set(modeLayer, dmRect()); save(); push(); },
             dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; dmShow(); push(); },
             dmOn(flag) { settings.driveMode.on = !!flag; dmShow(); save(); push(); },
             dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect() }),
