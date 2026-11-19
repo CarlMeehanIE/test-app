@@ -844,7 +844,7 @@ function main() {
         const poll = () => hmi(settings.shift.on && !v.own ? shift.RPM.poll : shift.RPM.poll.replace(/ 50 /, ' 0 '));
         let cr = null;
         const layers = {};                            // target -> layer ref
-        let modeLayer = null; const modeCache = {};   // drive-mode indicator image layer (byte0 1-10 -> icons/modes/N.png)
+        const modeLayers = {}; const modeCache = {}; const modeState = {};   // drive-mode layers (guide strip + panel/contend) - test which renders
         const dmRect = () => { const d = settings.driveMode; return { x: d.x, y: d.y, w: d.w, h: d.h }; };
         const dmCanvas = (img) => {                    // fit the png onto the DM canvas (exact size -> straight through)
             if (img.w === DM_IW && img.h === DM_IH) return Buffer.from(img.data);
@@ -860,10 +860,13 @@ function main() {
             modeCache[n] = b; return b;
         };
         const dmShow = () => {
-            if (!cr || !modeLayer) return;
+            if (!cr) return;
             const n = v.dmPreview || v.dmMode, b = n ? dmBuf(n) : null;
-            if (b && settings.driveMode.on) { cr.pixels(modeLayer, null, b); cr.set(modeLayer, { visible: 1 }); }
-            else cr.set(modeLayer, { visible: 0 });
+            for (const k of Object.keys(modeLayers)) {
+                const L = modeLayers[k]; if (!L) continue;
+                if (b && settings.driveMode.on) { cr.pixels(L, null, b); cr.set(L, { visible: 1 }); }
+                else cr.set(L, { visible: 0 });
+            }
         };
         if (fs.existsSync(CLUSTER)) {
             try {
@@ -874,11 +877,16 @@ function main() {
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });
                     cr.uniform(layers[t], 'u_seg', [0]); cr.uniform(layers[t], 'u_flash', [0]);
                 });
-                const dr = dmRect();                  // the drive-mode image layer on the full cluster face (panel, 1920x720)
-                modeLayer = cr.image({ target: 'panel', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 });
+                // TEST: two layers to see which renders - the shift-light strip `guide` (known-good, upper area) and
+                // the full cluster face `panel` via contend (the attempt to reach the bottom). Lock to the winner next.
+                const dr = dmRect();
+                try { modeLayers.guide = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: 171, y: 100, w: 360, h: 105, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm guide layer: ' + e.message); }
+                try { modeLayers.panel = cr.image({ target: 'panel', klass: 'overlay', contend: true, z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm panel layer: ' + e.message); }
                 cr.on('layer', (ref, state, reason) => {
                     if (ref === layers.guide) { v.layer = state; push(); }
-                    log(`shift lights: ${ref === layers.hud ? 'hud' : 'guide'} layer ${state}${reason ? ` (${reason})` : ''}`);
+                    if (ref === modeLayers.guide) { modeState.guide = state + (reason ? ` (${reason})` : ''); push(); }
+                    if (ref === modeLayers.panel) { modeState.panel = state + (reason ? ` (${reason})` : ''); push(); }
+                    log(`cr layer ${ref} ${state}${reason ? ` (${reason})` : ''}`);
                 });
                 cr.on('target', (name, state, holder, reason) => log(`shift lights: target ${name} ${state}${reason ? ` (${reason})` : ''}`));
                 cr.on('ready', () => { v.renderer = 'connected'; dmShow(); push(); });
@@ -910,10 +918,10 @@ function main() {
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
             mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmShow(); push(); } },
-            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, GW], y: [0, GH], w: [8, GW], h: [8, GH] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayer) cr.set(modeLayer, dmRect()); save(); push(); },
+            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, GW], y: [0, GH], w: [8, GW], h: [8, GH] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayers.panel) cr.set(modeLayers.panel, dmRect()); save(); push(); },
             dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; dmShow(); push(); },
             dmOn(flag) { settings.driveMode.on = !!flag; dmShow(); save(); push(); },
-            dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect() }),
+            dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect(), layers: Object.assign({}, modeState) }),
             close() { if (cr) cr.close(); },
         };
     })();
