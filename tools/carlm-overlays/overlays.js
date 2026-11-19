@@ -184,7 +184,7 @@ const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, amb
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
-    driveMode: { on: true, x: 171, y: 100, w: 360, h: 105 } };   // low in the 702x213 guide strip (lowest a background overlay reaches)
+    driveMode: { on: true, cx: 351, cy: 165, fontPx: 23, fadeIn: 340, hold: 2600, fadeOut: 360 } };   // centred low in the 702x213 guide strip; fontPx scales the baked text, timings = OEM-style flash
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -197,8 +197,8 @@ const VEHICLE2 = 0xb519, KOMBI_EV = 0x807c, KOMBI_SUB = 'sub 0xb519 1 1 1 0x807c
 // and the head unit asleep (STR: the process stood still WAKE_MS or longer)
 const VCOND = 0x1531, VCOND_EV = 0x8002, VCOND_SUB = 'sub 0x1531 1 1 2 0x8002', WAKE_MS = 60000;
 // drive mode (Fahrerlebnisschalter): FES 0xb50d, statusFESVehicleDynamicSwitchHMI event 0x8025, payload byte0 = mode 1-10
-// (confirmed live 2026-11-19). Shown on the cluster as an image (text labels now, Carl's icons later, same DM canvas).
-const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 702, GH = 213;   // GW/GH = `guide` strip (the only zone a background overlay can draw into; panel is owned by BMW's view)
+// (confirmed live 2026-11-19). On a change we flash the mode's text in the `guide` strip (OEM-style: fade + drop in, hold, fade out).
+const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_BASE = 120, GW = 702, GH = 213;   // DM_BASE = per-line font px baked into the mode PNGs; GW/GH = `guide` strip (the only zone a background overlay can draw into; panel is owned by BMW's view)
 const MODE_NAME = { 1: 'Sport', 2: 'Sport+', 3: 'Sport Individual', 4: 'Comfort', 5: 'Comfort+', 6: 'Comfort Individual', 7: 'Eco Pro', 8: 'Eco Pro+', 9: 'Eco Pro Individual', 10: 'Adaptive' };
 const carOff = (hex) => [1, 2, 3, 5].indexOf(parseInt((hex || '').slice(10, 12), 16)) >= 0;
 const mReset = (m) => { m.sp18 = 0; m.setup = 0; };
@@ -341,15 +341,15 @@ function mergeSettings(cur, p) {
         ['m1', 'm2', 'off'].forEach((k) => { if (MODES.indexOf(p.mmode[k]) >= 0) out.mmode[k] = p.mmode[k]; });
         if (MCAR.indexOf(p.mmode.car) >= 0) out.mmode.car = p.mmode.car;
     }
-    if (p.driveMode && typeof p.driveMode === 'object') {
-        if (typeof p.driveMode.on === 'boolean') out.driveMode.on = p.driveMode.on;
-        const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
-        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = Math.round(p.driveMode.x);
-        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = Math.round(p.driveMode.y);
-        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 40, GW);
-        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 20, GH);
-        const d = out.driveMode;            // keep it fully on-screen within the guide strip (recovers an old panel-space value)
-        d.x = Math.max(0, Math.min(GW - d.w, d.x)); d.y = Math.max(0, Math.min(GH - d.h, d.y));
+    if (p.driveMode && typeof p.driveMode === 'object') {   // the flash popup; pre-0.61 x/y/w/h (panel-space) are ignored -> defaults, re-aligned in the car
+        const dm = p.driveMode, d = out.driveMode, clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
+        if (typeof dm.on === 'boolean') d.on = dm.on;
+        if (Number.isFinite(dm.cx)) d.cx = clamp(dm.cx, 0, GW);
+        if (Number.isFinite(dm.cy)) d.cy = clamp(dm.cy, 0, GH);
+        if (Number.isFinite(dm.fontPx)) d.fontPx = clamp(dm.fontPx, 8, DM_BASE);
+        if (Number.isFinite(dm.fadeIn)) d.fadeIn = clamp(dm.fadeIn, 0, 5000);
+        if (Number.isFinite(dm.hold)) d.hold = clamp(dm.hold, 0, 20000);
+        if (Number.isFinite(dm.fadeOut)) d.fadeOut = clamp(dm.fadeOut, 0, 5000);
     }
     out.shift = shift.mergeSettings(out.shift, p.shift);
     return out;
@@ -841,34 +841,52 @@ function main() {
      * HUD (a client's M2, 2026-11-05: ours over the map). Off or an M car: no rpm polling, no layer shown */
     const sl = (() => {
         const v = { rpm: 0, limit: null, dme: null, dmeAt: 0, seg: -1, flash: null, shown: {}, vis: { shown: false, lowSince: 0 },
-            renderer: 'missing', layer: '', own: null, dmMode: 0, dmPreview: 0 };
+            renderer: 'missing', layer: '', own: null, dmMode: 0, dmPreview: 0, dmShown: 0 };
         const own = () => mcarOf(mcar || v.dmeAt > 0, settings);
         const poll = () => hmi(settings.shift.on && !v.own ? shift.RPM.poll : shift.RPM.poll.replace(/ 50 /, ' 0 '));
         let cr = null;
         const layers = {};                            // target -> layer ref
-        const modeLayers = {}; const modeCache = {}; const modeState = {};   // drive-mode layers (guide strip + panel/contend) - test which renders
-        const dmRect = () => { const d = settings.driveMode; return { x: d.x, y: d.y, w: d.w, h: d.h }; };
-        const dmCanvas = (img) => {                    // fit the png onto the DM canvas (exact size -> straight through)
-            if (img.w === DM_IW && img.h === DM_IH) return Buffer.from(img.data);
-            const k = Math.min(DM_IW / img.w, DM_IH / img.h), sw = Math.max(1, Math.round(img.w * k)), sh = Math.max(1, Math.round(img.h * k));
-            const s = png.scale(img, sw, sh), out = Buffer.alloc(DM_IW * DM_IH * 4), ox = (DM_IW - sw) >> 1, oy = (DM_IH - sh) >> 1;
-            for (let y = 0; y < sh; y++) s.data.copy(out, ((oy + y) * DM_IW + ox) * 4, y * sw * 4, y * sw * 4 + sw * 4);
-            return out;
+        const modeL = {};                             // mode enum -> { ref, w, h }: lazily-created image layers, each the mode PNG's native size
+        let dmTimer = null;                           // the active flash animation (setInterval)
+        const dmLayer = (n) => {                       // create (once) the image layer for mode n and upload its pixels
+            if (n in modeL) return modeL[n];
+            if (!cr) return null;
+            try {
+                const img = png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'modes', n + '.png')));
+                const ref = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: 0, y: 0, w: img.w, h: img.h, iw: img.w, ih: img.h, visible: 0 });
+                cr.pixels(ref, null, Buffer.from(img.data));
+                modeL[n] = { ref, w: img.w, h: img.h };
+            } catch (e) { log('drive mode image ' + n + ': ' + e.message); modeL[n] = null; }
+            return modeL[n];
         };
-        const dmBuf = (n) => {
-            if (n in modeCache) return modeCache[n];
-            let b = null;
-            try { b = dmCanvas(png.decode(fs.readFileSync(path.join(__dirname, 'icons', 'modes', n + '.png')))); } catch (e) { log('drive mode image ' + n + ': ' + e.message); }
-            modeCache[n] = b; return b;
+        const dmHideAll = () => { if (cr) for (const k in modeL) if (modeL[k]) cr.set(modeL[k].ref, { visible: 0 }); };
+        const dmPlace = (L, yoff, op) => {             // centre L at (cx,cy), scaled by fontPx/DM_BASE, dropped by yoff, at opacity op
+            const d = settings.driveMode, k = d.fontPx / DM_BASE, w = L.w * k, h = L.h * k;
+            cr.set(L.ref, { x: Math.round(d.cx - w / 2), y: Math.round(d.cy - h / 2 + yoff), w: Math.round(w), h: Math.round(h), opacity: op, visible: 1 });
         };
-        const dmShow = () => {
-            if (!cr) return;
-            const n = v.dmPreview || v.dmMode, b = n ? dmBuf(n) : null;
-            for (const k of Object.keys(modeLayers)) {
-                const L = modeLayers[k]; if (!L) continue;
-                if (b && settings.driveMode.on) { cr.pixels(L, null, b); cr.set(L, { visible: 1 }); }
-                else cr.set(L, { visible: 0 });
-            }
+        const dmStop = () => { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } };
+        const dmStatic = (n) => {                      // hold a mode still (for the in-car Align page)
+            dmStop(); dmHideAll();
+            if (!cr || !settings.driveMode.on) { v.dmShown = 0; return; }
+            const L = dmLayer(n); if (L) { dmPlace(L, 0, 1); v.dmShown = n; }
+        };
+        const dmFlash = (n) => {                        // OEM-style transient: fade + drop in, hold, fade + drop out
+            if (!cr || !settings.driveMode.on) return;
+            const L = dmLayer(n); if (!L) return;
+            dmStop(); dmHideAll();
+            const d = settings.driveMode, drop = (L.h * d.fontPx / DM_BASE) * 0.22, out = drop * 0.6;
+            const FI = Math.max(1, d.fadeIn), HO = Math.max(0, d.hold), FO = Math.max(1, d.fadeOut), end = FI + HO + FO, t0 = Date.now();
+            v.dmShown = n;
+            const frame = () => {
+                const e = Date.now() - t0;
+                if (e >= end) { dmStop(); if (cr) cr.set(L.ref, { visible: 0 }); v.dmShown = 0; push(); return; }
+                let op, yo;
+                if (e < FI) { const p = e / FI; op = p; yo = -drop * (1 - p); }
+                else if (e < FI + HO) { op = 1; yo = 0; }
+                else { const p = (e - FI - HO) / FO; op = 1 - p; yo = out * p; }
+                dmPlace(L, yo, op);
+            };
+            frame(); dmTimer = setInterval(frame, 16);
         };
         if (fs.existsSync(CLUSTER)) {
             try {
@@ -879,18 +897,15 @@ function main() {
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });
                     cr.uniform(layers[t], 'u_seg', [0]); cr.uniform(layers[t], 'u_flash', [0]);
                 });
-                // The drive-mode indicator lives in the `guide` strip - the only cluster zone a background overlay can
-                // draw into (panel is owned by BMW's cluster view; a contend overlay there does not render). 702x213.
-                const dr = dmRect();
-                try { modeLayers.guide = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm guide layer: ' + e.message); }
+                // The drive-mode flash lives in the `guide` strip - the only cluster zone a background overlay can draw
+                // into (panel is owned by BMW's cluster view; a contend overlay there does not render). 702x213.
+                // Its per-mode image layers are created lazily on the first flash of each mode (see dmLayer).
                 cr.on('layer', (ref, state, reason) => {
                     if (ref === layers.guide) { v.layer = state; push(); }
-                    if (ref === modeLayers.guide) { modeState.guide = state + (reason ? ` (${reason})` : ''); push(); }
-                    if (ref === modeLayers.panel) { modeState.panel = state + (reason ? ` (${reason})` : ''); push(); }
                     log(`cr layer ${ref} ${state}${reason ? ` (${reason})` : ''}`);
                 });
                 cr.on('target', (name, state, holder, reason) => log(`shift lights: target ${name} ${state}${reason ? ` (${reason})` : ''}`));
-                cr.on('ready', () => { v.renderer = 'connected'; dmShow(); push(); });
+                cr.on('ready', () => { v.renderer = 'connected'; if (v.dmPreview) dmStatic(v.dmPreview); push(); });
                 cr.on('disconnected', () => { v.renderer = 'not running'; push(); });
                 cr.on('refused', (op, ref, reason) => { v.layer = `refused: ${reason}`; log(`shift lights: ${op} refused: ${reason}`); push(); });
                 cr.connect();
@@ -918,12 +933,12 @@ function main() {
             settings() { v.own = own(); poll(); update(); },
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
-            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmShow(); push(); } },
-            dmAlign(rect) { const d = settings.driveMode; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.round(rect[k]); }); d.w = Math.max(40, Math.min(GW, d.w)); d.h = Math.max(20, Math.min(GH, d.h)); d.x = Math.max(0, Math.min(GW - d.w, d.x)); d.y = Math.max(0, Math.min(GH - d.h, d.y)); if (cr && modeLayers.guide) cr.set(modeLayers.guide, dmRect()); save(); push(); },
-            dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; dmShow(); push(); },
-            dmOn(flag) { settings.driveMode.on = !!flag; dmShow(); save(); push(); },
-            dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect(), layers: Object.assign({}, modeState) }),
-            close() { if (cr) cr.close(); },
+            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmFlash(n); push(); } },
+            dmAlign(rect) { const d = settings.driveMode; if (Number.isFinite(rect.cx)) d.cx = Math.round(rect.cx); if (Number.isFinite(rect.cy)) d.cy = Math.round(rect.cy); if (Number.isFinite(rect.fontPx)) d.fontPx = Math.round(rect.fontPx); d.fontPx = Math.max(8, Math.min(DM_BASE, d.fontPx)); d.cx = Math.max(0, Math.min(GW, d.cx)); d.cy = Math.max(0, Math.min(GH, d.cy)); if (v.dmShown && modeL[v.dmShown]) dmPlace(modeL[v.dmShown], 0, 1); save(); push(); },
+            dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; if (v.dmPreview) dmStatic(v.dmPreview); else { dmStop(); dmHideAll(); v.dmShown = 0; } push(); },
+            dmOn(flag) { settings.driveMode.on = !!flag; if (!settings.driveMode.on) { dmStop(); dmHideAll(); v.dmShown = 0; } save(); push(); },
+            dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, pos: { cx: settings.driveMode.cx, cy: settings.driveMode.cy, fontPx: settings.driveMode.fontPx }, preview: v.dmPreview }),
+            close() { dmStop(); if (cr) cr.close(); },
         };
     })();
     const m = { sp21: false, setup: 0 };
