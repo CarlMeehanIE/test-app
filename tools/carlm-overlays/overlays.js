@@ -184,7 +184,7 @@ const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, amb
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
-    driveMode: { on: true, x: 780, y: 600, w: 360, h: 105 } };   // bottom-centre of the 1920x720 panel (near the status row)
+    driveMode: { on: true, x: 171, y: 100, w: 360, h: 105 } };   // low in the 702x213 guide strip (lowest a background overlay reaches)
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -198,7 +198,7 @@ const VEHICLE2 = 0xb519, KOMBI_EV = 0x807c, KOMBI_SUB = 'sub 0xb519 1 1 1 0x807c
 const VCOND = 0x1531, VCOND_EV = 0x8002, VCOND_SUB = 'sub 0x1531 1 1 2 0x8002', WAKE_MS = 60000;
 // drive mode (Fahrerlebnisschalter): FES 0xb50d, statusFESVehicleDynamicSwitchHMI event 0x8025, payload byte0 = mode 1-10
 // (confirmed live 2026-11-19). Shown on the cluster as an image (text labels now, Carl's icons later, same DM canvas).
-const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 1920, GH = 720;   // GW/GH = cluster-render `panel` target size (whole cluster face)
+const FES = 0xb50d, FES_MODE_EV = 0x8025, DM_IW = 480, DM_IH = 140, GW = 702, GH = 213;   // GW/GH = `guide` strip (the only zone a background overlay can draw into; panel is owned by BMW's view)
 const MODE_NAME = { 1: 'Sport', 2: 'Sport+', 3: 'Sport Individual', 4: 'Comfort', 5: 'Comfort+', 6: 'Comfort Individual', 7: 'Eco Pro', 8: 'Eco Pro+', 9: 'Eco Pro Individual', 10: 'Adaptive' };
 const carOff = (hex) => [1, 2, 3, 5].indexOf(parseInt((hex || '').slice(10, 12), 16)) >= 0;
 const mReset = (m) => { m.sp18 = 0; m.setup = 0; };
@@ -344,10 +344,12 @@ function mergeSettings(cur, p) {
     if (p.driveMode && typeof p.driveMode === 'object') {
         if (typeof p.driveMode.on === 'boolean') out.driveMode.on = p.driveMode.on;
         const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
-        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = clamp(p.driveMode.x, 0, GW);
-        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = clamp(p.driveMode.y, 0, GH);
-        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 8, GW);
-        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 8, GH);
+        if (Number.isFinite(p.driveMode.x)) out.driveMode.x = Math.round(p.driveMode.x);
+        if (Number.isFinite(p.driveMode.y)) out.driveMode.y = Math.round(p.driveMode.y);
+        if (Number.isFinite(p.driveMode.w)) out.driveMode.w = clamp(p.driveMode.w, 40, GW);
+        if (Number.isFinite(p.driveMode.h)) out.driveMode.h = clamp(p.driveMode.h, 20, GH);
+        const d = out.driveMode;            // keep it fully on-screen within the guide strip (recovers an old panel-space value)
+        d.x = Math.max(0, Math.min(GW - d.w, d.x)); d.y = Math.max(0, Math.min(GH - d.h, d.y));
     }
     out.shift = shift.mergeSettings(out.shift, p.shift);
     return out;
@@ -877,11 +879,10 @@ function main() {
                     layers[t] = cr.effect({ target: t, klass: 'overlay', x: 0, y: 0, w: g.w, h: g.h, fs: shift.fs(g), time: true, visible: 0 });
                     cr.uniform(layers[t], 'u_seg', [0]); cr.uniform(layers[t], 'u_flash', [0]);
                 });
-                // TEST: two layers to see which renders - the shift-light strip `guide` (known-good, upper area) and
-                // the full cluster face `panel` via contend (the attempt to reach the bottom). Lock to the winner next.
+                // The drive-mode indicator lives in the `guide` strip - the only cluster zone a background overlay can
+                // draw into (panel is owned by BMW's cluster view; a contend overlay there does not render). 702x213.
                 const dr = dmRect();
-                try { modeLayers.guide = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: 171, y: 100, w: 360, h: 105, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm guide layer: ' + e.message); }
-                try { modeLayers.panel = cr.image({ target: 'panel', klass: 'overlay', contend: true, z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm panel layer: ' + e.message); }
+                try { modeLayers.guide = cr.image({ target: 'guide', klass: 'overlay', z: 2, x: dr.x, y: dr.y, w: dr.w, h: dr.h, iw: DM_IW, ih: DM_IH, visible: 0 }); } catch (e) { log('dm guide layer: ' + e.message); }
                 cr.on('layer', (ref, state, reason) => {
                     if (ref === layers.guide) { v.layer = state; push(); }
                     if (ref === modeLayers.guide) { modeState.guide = state + (reason ? ` (${reason})` : ''); push(); }
@@ -918,7 +919,7 @@ function main() {
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
             mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmShow(); push(); } },
-            dmAlign(rect) { const d = settings.driveMode, B = { x: [0, GW], y: [0, GH], w: [8, GW], h: [8, GH] }; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.max(B[k][0], Math.min(B[k][1], Math.round(rect[k]))); }); if (cr && modeLayers.panel) cr.set(modeLayers.panel, dmRect()); save(); push(); },
+            dmAlign(rect) { const d = settings.driveMode; ['x', 'y', 'w', 'h'].forEach((k) => { if (Number.isFinite(rect[k])) d[k] = Math.round(rect[k]); }); d.w = Math.max(40, Math.min(GW, d.w)); d.h = Math.max(20, Math.min(GH, d.h)); d.x = Math.max(0, Math.min(GW - d.w, d.x)); d.y = Math.max(0, Math.min(GH - d.h, d.y)); if (cr && modeLayers.guide) cr.set(modeLayers.guide, dmRect()); save(); push(); },
             dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; dmShow(); push(); },
             dmOn(flag) { settings.driveMode.on = !!flag; dmShow(); save(); push(); },
             dmStatus: () => ({ renderer: v.renderer, mode: v.dmMode, name: MODE_NAME[v.dmMode] || null, on: settings.driveMode.on, rect: dmRect(), layers: Object.assign({}, modeState) }),
