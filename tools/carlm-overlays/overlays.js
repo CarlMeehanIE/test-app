@@ -864,10 +864,12 @@ function main() {
             cr.set(L.ref, { x: Math.round(d.cx - w / 2), y: Math.round(d.cy - h / 2 + yoff), w: Math.round(w), h: Math.round(h), opacity: op, visible: 1 });
         };
         const dmStop = () => { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } if (dmPending) { clearTimeout(dmPending); dmPending = null; } };
-        const dmTrigger = (n) => {                     // on a real mode change: wait out the cluster's own animation, then flash
+        const dmGroup = (m) => (m >= 1 && m <= 3 ? 1 : 2);   // the cluster's two views: Sport (1-3) vs Comfort/Eco (4-10)
+        const dmTrigger = (n, prev) => {               // on a real mode change: delay only when the cluster switches view (so its own animation settles first); flash straight away within a view
             if (!cr || !settings.driveMode.on) return;
             if (dmPending) { clearTimeout(dmPending); dmPending = null; }
-            const wait = Math.max(0, settings.driveMode.delay | 0);
+            const cross = prev >= 1 && dmGroup(n) !== dmGroup(prev);
+            const wait = cross ? Math.max(0, settings.driveMode.delay | 0) : 0;
             if (wait) dmPending = setTimeout(() => { dmPending = null; dmFlash(n); }, wait);
             else dmFlash(n);
         };
@@ -939,7 +941,7 @@ function main() {
             settings() { v.own = own(); poll(); update(); },
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
-            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmTrigger(n); push(); } },
+            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { const prev = v.dmMode; v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmTrigger(n, prev); push(); } },
             dmAlign(rect) { const d = settings.driveMode; if (Number.isFinite(rect.cx)) d.cx = Math.round(rect.cx); if (Number.isFinite(rect.cy)) d.cy = Math.round(rect.cy); if (Number.isFinite(rect.fontPx)) d.fontPx = Math.round(rect.fontPx); d.fontPx = Math.max(8, Math.min(DM_BASE, d.fontPx)); d.cx = Math.max(0, Math.min(GW, d.cx)); d.cy = Math.max(0, Math.min(GH, d.cy)); if (v.dmShown && modeL[v.dmShown]) dmPlace(modeL[v.dmShown], 0, 1); save(); push(); },
             dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; if (v.dmPreview) dmStatic(v.dmPreview); else { dmStop(); dmHideAll(); v.dmShown = 0; } push(); },
             dmOn(flag) { settings.driveMode.on = !!flag; if (!settings.driveMode.on) { dmStop(); dmHideAll(); v.dmShown = 0; } save(); push(); },
