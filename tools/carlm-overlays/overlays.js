@@ -185,7 +185,7 @@ const SETTINGS = { shortcuts: true, seats: true, wheel: true, ambient: true, amb
     show: BUTTON_KEYS.reduce((o, k) => { o[k] = 'auto'; return o; }, {}),
     align: ALIGN_KEYS.reduce((o, k) => { o[k] = Object.assign({ x: 0, ix: 0, y: 0, ly: 0, lx: 0, lhx: 0, sz: 0 }, ALIGN_DEFAULTS[k]); return o; }, {}),
     mmode: { on: true, m1: 'sport', m2: 'sport', off: 'road', start: 'car', car: 'auto' }, shift: shift.DEFAULTS,
-    driveMode: { on: true, cx: 351, cy: 165, fontPx: 23, fadeIn: 340, hold: 2600, fadeOut: 360 } };   // centred low in the 702x213 guide strip; fontPx scales the baked text, timings = OEM-style flash
+    driveMode: { on: true, cx: 351, cy: 165, fontPx: 23, delay: 500, fadeIn: 170, hold: 1300, fadeOut: 180 } };   // centred low in the 702x213 guide strip; fontPx scales the baked text. delay = wait for the cluster's own view-switch animation to settle before drawing; fade/hold/fade = the flash (baked, not user-set)
 // MDrive 0xB51F, the active M setup: statusMConfigurationMDrive 0x8018 byte 0 (Hmi8's ...SP21: 0 none, 1 M1, 2 M2,
 // 3 unset) or, older, statusMDriveTwo 0x8001 byte 0 (...SP18: statusMDrive2 0 off, 1 on); SP21 wins once seen
 const MDRIVE = 0xb51f, MDRIVE_SUB = `sub 0xb51f 1 1 1 0x8018 0x8001 0x${shift.DME.ev.toString(16)}`;
@@ -342,15 +342,12 @@ function mergeSettings(cur, p) {
         ['m1', 'm2', 'off'].forEach((k) => { if (MODES.indexOf(p.mmode[k]) >= 0) out.mmode[k] = p.mmode[k]; });
         if (MCAR.indexOf(p.mmode.car) >= 0) out.mmode.car = p.mmode.car;
     }
-    if (p.driveMode && typeof p.driveMode === 'object') {   // the flash popup; pre-0.61 x/y/w/h (panel-space) are ignored -> defaults, re-aligned in the car
+    if (p.driveMode && typeof p.driveMode === 'object') {   // the flash popup; only on/position/size are user settings - the timings (delay/fade/hold) stay baked so a tool update always applies the latest. pre-0.61 x/y/w/h (panel-space) are ignored -> defaults, re-aligned in the car
         const dm = p.driveMode, d = out.driveMode, clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
         if (typeof dm.on === 'boolean') d.on = dm.on;
         if (Number.isFinite(dm.cx)) d.cx = clamp(dm.cx, 0, GW);
         if (Number.isFinite(dm.cy)) d.cy = clamp(dm.cy, 0, GH);
         if (Number.isFinite(dm.fontPx)) d.fontPx = clamp(dm.fontPx, 8, DM_BASE);
-        if (Number.isFinite(dm.fadeIn)) d.fadeIn = clamp(dm.fadeIn, 0, 5000);
-        if (Number.isFinite(dm.hold)) d.hold = clamp(dm.hold, 0, 20000);
-        if (Number.isFinite(dm.fadeOut)) d.fadeOut = clamp(dm.fadeOut, 0, 5000);
     }
     out.shift = shift.mergeSettings(out.shift, p.shift);
     return out;
@@ -849,6 +846,7 @@ function main() {
         const layers = {};                            // target -> layer ref
         const modeL = {};                             // mode enum -> { ref, w, h }: lazily-created image layers, each the mode PNG's native size
         let dmTimer = null;                           // the active flash animation (setInterval)
+        let dmPending = null;                         // the delay before a flash starts (lets the cluster's view-switch settle)
         const dmLayer = (n) => {                       // create (once) the image layer for mode n and upload its pixels
             if (n in modeL) return modeL[n];
             if (!cr) return null;
@@ -865,7 +863,14 @@ function main() {
             const d = settings.driveMode, k = d.fontPx / DM_BASE, w = L.w * k, h = L.h * k;
             cr.set(L.ref, { x: Math.round(d.cx - w / 2), y: Math.round(d.cy - h / 2 + yoff), w: Math.round(w), h: Math.round(h), opacity: op, visible: 1 });
         };
-        const dmStop = () => { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } };
+        const dmStop = () => { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } if (dmPending) { clearTimeout(dmPending); dmPending = null; } };
+        const dmTrigger = (n) => {                     // on a real mode change: wait out the cluster's own animation, then flash
+            if (!cr || !settings.driveMode.on) return;
+            if (dmPending) { clearTimeout(dmPending); dmPending = null; }
+            const wait = Math.max(0, settings.driveMode.delay | 0);
+            if (wait) dmPending = setTimeout(() => { dmPending = null; dmFlash(n); }, wait);
+            else dmFlash(n);
+        };
         const dmStatic = (n) => {                      // hold a mode still (for the in-car Align page)
             dmStop(); dmHideAll();
             if (!cr || !settings.driveMode.on) { v.dmShown = 0; return; }
@@ -934,7 +939,7 @@ function main() {
             settings() { v.own = own(); poll(); update(); },
             status: () => ({ renderer: v.renderer, layer: v.layer, limit: v.limit, dme: v.dmeAt > 0, own: own(), th: shift.thresholds(settings.shift, v.limit) }),
             tick: update,                             // the hysteresis' timeout
-            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmFlash(n); push(); } },
+            mode(hex) { const n = parseInt((hex || '').slice(0, 2), 16); if (n >= 1 && n <= 10 && n !== v.dmMode) { v.dmMode = n; log('drive mode: ' + (MODE_NAME[n] || n)); if (!v.dmPreview) dmTrigger(n); push(); } },
             dmAlign(rect) { const d = settings.driveMode; if (Number.isFinite(rect.cx)) d.cx = Math.round(rect.cx); if (Number.isFinite(rect.cy)) d.cy = Math.round(rect.cy); if (Number.isFinite(rect.fontPx)) d.fontPx = Math.round(rect.fontPx); d.fontPx = Math.max(8, Math.min(DM_BASE, d.fontPx)); d.cx = Math.max(0, Math.min(GW, d.cx)); d.cy = Math.max(0, Math.min(GH, d.cy)); if (v.dmShown && modeL[v.dmShown]) dmPlace(modeL[v.dmShown], 0, 1); save(); push(); },
             dmPreview(n) { v.dmPreview = (n >= 1 && n <= 10) ? n : 0; if (v.dmPreview) dmStatic(v.dmPreview); else { dmStop(); dmHideAll(); v.dmShown = 0; } push(); },
             dmOn(flag) { settings.driveMode.on = !!flag; if (!settings.driveMode.on) { dmStop(); dmHideAll(); v.dmShown = 0; } save(); push(); },
